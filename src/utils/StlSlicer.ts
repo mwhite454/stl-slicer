@@ -137,14 +137,32 @@ export class StlSlicer {
       end = max.z;
     }
 
+    // Calculate total height and adjust for even layer distribution
+    const totalHeight = end - start;
+    
+    // Ensure we have at least 2 layers (start and end)
+    const minLayers = 2;
+    
+    // Calculate how many layers we need
+    const calculatedLayerCount = Math.max(
+      minLayers, 
+      Math.ceil(totalHeight / layerThickness)
+    );
+    
+    // Recalculate layer thickness to evenly distribute layers
+    // This ensures we have slices that perfectly match the model bounds
+    const adjustedLayerThickness = totalHeight / (calculatedLayerCount - 1);
+    
     // Generate slice planes
     const layers: LayerData[] = [];
-    let layerIndex = 0;
     
-    for (let z = start; z <= end; z += layerThickness) {
+    // Create evenly distributed slices from start to end (inclusive)
+    for (let i = 0; i < calculatedLayerCount; i++) {
+      const z = start + (i * adjustedLayerThickness);
       const paths = this.createSlice(z, axis);
+      
       layers.push({
-        index: layerIndex++,
+        index: i,
         paths,
         z
       });

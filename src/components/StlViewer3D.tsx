@@ -26,8 +26,10 @@ export default function StlViewer3D({
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
+  const gridHelperRef = useRef<THREE.GridHelper | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [showSlicePlanes, setShowSlicePlanes] = useState<boolean>(true);
+  const [showGrid, setShowGrid] = useState<boolean>(true);
   
   // Single effect to handle everything
   useEffect(() => {
@@ -107,8 +109,13 @@ export default function StlViewer3D({
     
     // Add helpers
     const gridHelper = new THREE.GridHelper(100, 20);
+    gridHelper.position.y = -20;
+    gridHelper.userData = { isHelper: true };
     scene.add(gridHelper);
+    gridHelperRef.current = gridHelper;
+    
     const axesHelper = new THREE.AxesHelper(10);
+    axesHelper.userData = { isHelper: true };
     scene.add(axesHelper);
     
     // Model references
@@ -219,6 +226,7 @@ export default function StlViewer3D({
       rendererRef.current = null;
       cameraRef.current = null;
       controlsRef.current = null;
+      gridHelperRef.current = null;
       
       // Dispose renderer
       renderer.dispose();
@@ -260,28 +268,39 @@ export default function StlViewer3D({
     // Don't create new planes if we're not showing them
     if (!showSlicePlanes) return;
     
-    // Get the model to determine its size
-    const model = scene.children.find((child: THREE.Object3D) => 
-      child instanceof THREE.Mesh && !(child.userData && child.userData.isSlicePlane && !child.userData.isHelper));
+    // Find all meshes that are actual model parts (not helpers or slice planes)
+    const modelMeshes = scene.children.filter((child: THREE.Object3D) => 
+      child instanceof THREE.Mesh && 
+      !(child.userData && (child.userData.isSlicePlane || child.userData.isHelper)));
     
-    // Get model size for plane dimensions
-    let maxDimension = 100;
-    if (model && (model as THREE.Mesh).geometry?.boundingBox) {
-      const size = new THREE.Vector3();
-      (model as THREE.Mesh).geometry.boundingBox!.getSize(size);
-      maxDimension = Math.max(size.x, size.y, size.z) * 1.5;
-    }
+    if (modelMeshes.length === 0) return;
+    
+    // Get the model bounding box to determine proper plane size and position
+    const modelBounds = new THREE.Box3();
+    modelMeshes.forEach((mesh: THREE.Object3D) => {
+      const meshBounds = new THREE.Box3().setFromObject(mesh);
+      modelBounds.union(meshBounds);
+    });
+    
+    const modelSize = new THREE.Vector3();
+    modelBounds.getSize(modelSize);
+    
+    // Make the planes slightly larger than the model
+    const planeWidth = Math.max(modelSize.x, modelSize.z) * 1.2;
+    const planeHeight = Math.max(modelSize.y, modelSize.z) * 1.2;
+    const planeDepth = Math.max(modelSize.x, modelSize.y) * 1.2;
     
     // Create plane geometry based on slicing axis
     let planeGeometry: THREE.PlaneGeometry;
+    
     if (axis === 'x') {
-      planeGeometry = new THREE.PlaneGeometry(maxDimension, maxDimension);
+      planeGeometry = new THREE.PlaneGeometry(planeHeight, planeDepth);
       planeGeometry.rotateY(Math.PI / 2);
     } else if (axis === 'y') {
-      planeGeometry = new THREE.PlaneGeometry(maxDimension, maxDimension);
+      planeGeometry = new THREE.PlaneGeometry(planeWidth, planeDepth);
       planeGeometry.rotateX(Math.PI / 2);
-    } else {
-      planeGeometry = new THREE.PlaneGeometry(maxDimension, maxDimension);
+    } else { // z-axis
+      planeGeometry = new THREE.PlaneGeometry(planeWidth, planeHeight);
     }
     
     // Add planes for visualization (limit the number for performance)
@@ -305,7 +324,7 @@ export default function StlViewer3D({
       // Mark this as a slice plane for easy identification
       plane.userData = { isSlicePlane: true };
       
-      // Position plane based on axis
+      // Position plane based on axis and the actual layer position
       if (axis === 'x') {
         plane.position.x = layer.z;
       } else if (axis === 'y') {
@@ -333,6 +352,27 @@ export default function StlViewer3D({
     setShowSlicePlanes(prev => !prev);
   }, []);
   
+  // Toggle for showing/hiding grid
+  const toggleGrid = useCallback(() => {
+    setShowGrid(prev => !prev);
+    if (gridHelperRef.current) {
+      gridHelperRef.current.visible = !showGrid;
+      if (rendererRef.current && cameraRef.current && sceneRef.current) {
+        rendererRef.current.render(sceneRef.current, cameraRef.current);
+      }
+    }
+  }, [showGrid]);
+  
+  // Effect to update grid visibility when showGrid changes
+  useEffect(() => {
+    if (gridHelperRef.current) {
+      gridHelperRef.current.visible = showGrid;
+      if (rendererRef.current && cameraRef.current && sceneRef.current) {
+        rendererRef.current.render(sceneRef.current, cameraRef.current);
+      }
+    }
+  }, [showGrid]);
+  
   return (
     <div 
       ref={containerRef}
@@ -358,7 +398,21 @@ export default function StlViewer3D({
         >
           {showSlicePlanes ? 'Hide Slices' : 'Show Slices'}
         </button>
+        <button 
+          onClick={toggleGrid}
+          className={`px-2 py-1 text-xs rounded shadow ${showGrid ? 'bg-blue-500 text-white' : 'bg-white/75 text-gray-700'}`}
+        >
+          {showGrid ? 'Hide Grid' : 'Show Grid'}
+        </button>
       </div>
+      
+      {/* Layer information display */}
+      {layers.length > 0 && showSlicePlanes && (
+        <div className="absolute top-2 left-2 bg-white/75 px-2 py-1 text-xs rounded shadow">
+          Layer: {activeLayerIndex + 1}/{layers.length} 
+          {layers[activeLayerIndex] && ` — Height: ${layers[activeLayerIndex].z.toFixed(2)}mm`}
+        </div>
+      )}
       
       <div className="absolute bottom-2 right-2 bg-white/75 px-2 py-1 text-xs rounded shadow">
         Drag to rotate | Scroll to zoom | Shift+drag to pan
