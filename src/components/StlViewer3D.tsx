@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
@@ -22,7 +22,12 @@ export default function StlViewer3D({
   activeLayerIndex 
 }: StlViewer3DProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const sceneRef = useRef<THREE.Scene | null>(null);
+  const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
+  const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
+  const controlsRef = useRef<OrbitControls | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [showSlicePlanes, setShowSlicePlanes] = useState<boolean>(true);
   
   // Single effect to handle everything
   useEffect(() => {
@@ -36,6 +41,7 @@ export default function StlViewer3D({
     // Setting up scene
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0xf0f0f0);
+    sceneRef.current = scene;
     
     // Add lights
     const ambientLight = new THREE.AmbientLight(0x888888);
@@ -53,6 +59,7 @@ export default function StlViewer3D({
       2000
     );
     camera.position.set(50, 50, 50);
+    cameraRef.current = camera;
     
     // Setup renderer
     const renderer = new THREE.WebGLRenderer({ 
@@ -61,6 +68,13 @@ export default function StlViewer3D({
     });
     renderer.setPixelRatio(window.devicePixelRatio);
     renderer.setSize(container.clientWidth, container.clientHeight);
+    rendererRef.current = renderer;
+
+    // Store references for access in other effects
+    (renderer as any).userData = {
+      __scene: scene,
+      __camera: camera
+    };
     
     // Clear container
     while (container.firstChild) {
@@ -83,6 +97,7 @@ export default function StlViewer3D({
     controls.maxDistance = 1000;
     controls.target.set(0, 0, 0);
     controls.update();
+    controlsRef.current = controls;
     console.log("[StlViewer3D] Set up controls", controls);
     
     // Test event handling
@@ -166,71 +181,6 @@ export default function StlViewer3D({
       }
     };
     
-    // Render slice planes
-    const renderSlicePlanes = () => {
-      // Clear existing planes
-      slicePlanes.forEach(plane => {
-        scene.remove(plane);
-        if (plane.geometry) plane.geometry.dispose();
-        if (plane.material instanceof THREE.Material) plane.material.dispose();
-      });
-      slicePlanes.length = 0;
-      
-      if (!layers.length) return;
-      
-      // Get model size for plane dimensions
-      let maxDimension = 100;
-      if (model?.geometry?.boundingBox) {
-        const size = new THREE.Vector3();
-        model.geometry.boundingBox.getSize(size);
-        maxDimension = Math.max(size.x, size.y, size.z) * 1.5;
-      }
-      
-      // Create plane geometry based on slicing axis
-      let planeGeometry: THREE.PlaneGeometry;
-      if (axis === 'x') {
-        planeGeometry = new THREE.PlaneGeometry(maxDimension, maxDimension);
-        planeGeometry.rotateY(Math.PI / 2);
-      } else if (axis === 'y') {
-        planeGeometry = new THREE.PlaneGeometry(maxDimension, maxDimension);
-        planeGeometry.rotateX(Math.PI / 2);
-      } else {
-        planeGeometry = new THREE.PlaneGeometry(maxDimension, maxDimension);
-      }
-      
-      // Add planes for visualization (limit the number for performance)
-      const displayRange = 5;
-      const startIdx = Math.max(0, activeLayerIndex - displayRange);
-      const endIdx = Math.min(layers.length - 1, activeLayerIndex + displayRange);
-      
-      for (let i = startIdx; i <= endIdx; i++) {
-        const layer = layers[i];
-        const isActive = i === activeLayerIndex;
-        
-        const material = new THREE.MeshBasicMaterial({
-          color: isActive ? 0xff5500 : 0x00ff00,
-          opacity: isActive ? 0.7 : 0.3,
-          transparent: true,
-          side: THREE.DoubleSide,
-          wireframe: false,
-        });
-        
-        const plane = new THREE.Mesh(planeGeometry.clone(), material);
-        
-        // Position plane based on axis
-        if (axis === 'x') {
-          plane.position.x = layer.z;
-        } else if (axis === 'y') {
-          plane.position.y = layer.z;
-        } else {
-          plane.position.z = layer.z;
-        }
-        
-        scene.add(plane);
-        slicePlanes.push(plane);
-      }
-    };
-    
     // Handle window resize
     const handleResize = () => {
       if (!container) return;
@@ -264,6 +214,12 @@ export default function StlViewer3D({
       cancelAnimationFrame(animFrameId);
       window.removeEventListener('resize', handleResize);
       
+      // Clear references
+      sceneRef.current = null;
+      rendererRef.current = null;
+      cameraRef.current = null;
+      controlsRef.current = null;
+      
       // Dispose renderer
       renderer.dispose();
       
@@ -285,20 +241,97 @@ export default function StlViewer3D({
     };
   }, [stlFile]); // Only re-initialize when the STL file changes
   
-  // Effect to update slice planes when layers or active layer changes
+  // Function to render slice planes
+  const renderSlicePlanes = useCallback(() => {
+    const scene = sceneRef.current;
+    if (!scene || !layers.length) return;
+    
+    // Remove existing slice planes from the scene
+    const existingPlanes = scene.children.filter((child: THREE.Object3D) => 
+      child.userData && child.userData.isSlicePlane);
+    
+    existingPlanes.forEach((plane: THREE.Object3D) => {
+      scene.remove(plane);
+      if ((plane as THREE.Mesh).geometry) (plane as THREE.Mesh).geometry.dispose();
+      if ((plane as THREE.Mesh).material instanceof THREE.Material) 
+        ((plane as THREE.Mesh).material as THREE.Material).dispose();
+    });
+    
+    // Don't create new planes if we're not showing them
+    if (!showSlicePlanes) return;
+    
+    // Get the model to determine its size
+    const model = scene.children.find((child: THREE.Object3D) => 
+      child instanceof THREE.Mesh && !(child.userData && child.userData.isSlicePlane && !child.userData.isHelper));
+    
+    // Get model size for plane dimensions
+    let maxDimension = 100;
+    if (model && (model as THREE.Mesh).geometry?.boundingBox) {
+      const size = new THREE.Vector3();
+      (model as THREE.Mesh).geometry.boundingBox!.getSize(size);
+      maxDimension = Math.max(size.x, size.y, size.z) * 1.5;
+    }
+    
+    // Create plane geometry based on slicing axis
+    let planeGeometry: THREE.PlaneGeometry;
+    if (axis === 'x') {
+      planeGeometry = new THREE.PlaneGeometry(maxDimension, maxDimension);
+      planeGeometry.rotateY(Math.PI / 2);
+    } else if (axis === 'y') {
+      planeGeometry = new THREE.PlaneGeometry(maxDimension, maxDimension);
+      planeGeometry.rotateX(Math.PI / 2);
+    } else {
+      planeGeometry = new THREE.PlaneGeometry(maxDimension, maxDimension);
+    }
+    
+    // Add planes for visualization (limit the number for performance)
+    const displayRange = 5;
+    const startIdx = Math.max(0, activeLayerIndex - displayRange);
+    const endIdx = Math.min(layers.length - 1, activeLayerIndex + displayRange);
+    
+    for (let i = startIdx; i <= endIdx; i++) {
+      const layer = layers[i];
+      const isActive = i === activeLayerIndex;
+      
+      const material = new THREE.MeshBasicMaterial({
+        color: isActive ? 0xff5500 : 0x00ff00,
+        opacity: isActive ? 0.7 : 0.3,
+        transparent: true,
+        side: THREE.DoubleSide,
+        wireframe: false,
+      });
+      
+      const plane = new THREE.Mesh(planeGeometry.clone(), material);
+      // Mark this as a slice plane for easy identification
+      plane.userData = { isSlicePlane: true };
+      
+      // Position plane based on axis
+      if (axis === 'x') {
+        plane.position.x = layer.z;
+      } else if (axis === 'y') {
+        plane.position.y = layer.z;
+      } else {
+        plane.position.z = layer.z;
+      }
+      
+      scene.add(plane);
+    }
+    
+    // Trigger a render
+    if (rendererRef.current && cameraRef.current) {
+      rendererRef.current.render(scene, cameraRef.current);
+    }
+  }, [layers, activeLayerIndex, axis, showSlicePlanes]);
+  
+  // Effect to update slice planes when layers, active layer, or axis changes
   useEffect(() => {
-    if (!containerRef.current || !layers.length) return;
-    
-    // This will be executed in the next render cycle,
-    // ensuring the main component is initialized
-    const timeoutId = setTimeout(() => {
-      // Force a re-render by accessing the DOM directly
-      const event = new Event('updateSlices');
-      containerRef.current?.dispatchEvent(event);
-    }, 100);
-    
-    return () => clearTimeout(timeoutId);
-  }, [layers, activeLayerIndex, axis]);
+    renderSlicePlanes();
+  }, [renderSlicePlanes]);
+  
+  // Toggle for showing/hiding slice planes
+  const toggleSlicePlanes = useCallback(() => {
+    setShowSlicePlanes(prev => !prev);
+  }, []);
   
   return (
     <div 
@@ -317,6 +350,15 @@ export default function StlViewer3D({
           Load an STL file to view the 3D model
         </div>
       )}
+      
+      <div className="absolute top-2 right-2 flex flex-col gap-2">
+        <button 
+          onClick={toggleSlicePlanes}
+          className={`px-2 py-1 text-xs rounded shadow ${showSlicePlanes ? 'bg-blue-500 text-white' : 'bg-white/75 text-gray-700'}`}
+        >
+          {showSlicePlanes ? 'Hide Slices' : 'Show Slices'}
+        </button>
+      </div>
       
       <div className="absolute bottom-2 right-2 bg-white/75 px-2 py-1 text-xs rounded shadow">
         Drag to rotate | Scroll to zoom | Shift+drag to pan

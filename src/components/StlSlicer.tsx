@@ -66,6 +66,28 @@ export default function StlSlicer() {
     }
   }, [isClientSide]);
   
+  // Update axis and trigger new slicing when changed
+  const handleAxisChange = useCallback((newAxis: Axis) => {
+    setAxis(newAxis);
+    
+    // Automatically re-slice when axis changes if we have a loaded file
+    if (slicerRef.current && file) {
+      setIsSlicing(true);
+      setTimeout(async () => {
+        try {
+          const slicedLayers = slicerRef.current!.sliceModel(newAxis, layerThickness);
+          setLayers(slicedLayers);
+          setPreviewLayerIndex(Math.floor(slicedLayers.length / 2)); // Preview middle layer
+        } catch (err) {
+          setError('Failed to slice the model with the new axis. Please try again.');
+          console.error(err);
+        } finally {
+          setIsSlicing(false);
+        }
+      }, 50);
+    }
+  }, [file, layerThickness]);
+  
   // Perform slicing operation
   const handleSlice = useCallback(async () => {
     if (!isClientSide) return;
@@ -255,7 +277,7 @@ export default function StlSlicer() {
                   name="axis"
                   value={a}
                   checked={axis === a}
-                  onChange={() => setAxis(a)}
+                  onChange={() => handleAxisChange(a)}
                   className="w-4 h-4 text-blue-600"
                 />
                 <span className="ml-2 text-gray-700 uppercase">{a}</span>
