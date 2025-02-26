@@ -1,6 +1,6 @@
 # STL Slicer Application
 
-A web application that loads STL files, slices them into layers, and exports the layers as SVG files. The app features both 3D and 2D visualization of the model and its slices.
+A web application that loads STL files, slices them into layers, and exports the layers as SVG files for cutting on a laser cutter. The app features both 3D and 2D visualization of the model and its slices.
 
 ## Features
 
