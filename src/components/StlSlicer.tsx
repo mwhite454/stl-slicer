@@ -339,13 +339,25 @@ export default function StlSlicer() {
       {file && (
         <div className="w-full">
           {viewMode === '3d' ? (
-            <StlViewer3D
-              stlFile={file}
-              layers={layers}
-              axis={axis}
-              layerThickness={layerThickness}
-              activeLayerIndex={previewLayerIndex}
-            />
+            <>
+              <StlViewer3D
+                stlFile={file}
+                layers={layers}
+                axis={axis}
+                layerThickness={layerThickness}
+                activeLayerIndex={previewLayerIndex}
+              />
+              {file && (
+                <div className="mt-2 p-2 bg-blue-50 rounded-md text-sm">
+                  <p className="font-medium">3D Model Controls:</p>
+                  <ul className="list-disc pl-5 text-gray-700">
+                    <li>Click and drag to rotate the model</li>
+                    <li>Scroll or pinch to zoom in/out</li>
+                    <li>Shift+click and drag (or right-click and drag) to pan</li>
+                  </ul>
+                </div>
+              )}
+            </>
           ) : (
             layers.length > 0 && (
               <div className="w-full">

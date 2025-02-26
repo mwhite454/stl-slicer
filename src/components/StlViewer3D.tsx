@@ -110,10 +110,21 @@ function StlViewer3D({
       // Add orbit controls
       const controls = new OrbitControls(camera, renderer.domElement);
       controls.enableDamping = true;
-      controls.dampingFactor = 0.1;
+      controls.dampingFactor = 0.25;
       controls.enableZoom = true;
+      controls.zoomSpeed = 1.2;
       controls.enablePan = true;
+      controls.panSpeed = 0.8;
+      controls.enableRotate = true;
+      controls.rotateSpeed = 1.0;
+      controls.target.set(0, 0, 0);
+      controls.minDistance = 0.1;
+      controls.maxDistance = 1000;
+      controls.update();
       controlsRef.current = controls;
+      
+      // Log that controls are initialized for debugging
+      console.log('OrbitControls initialized', controls);
       
       // Add grid for reference
       const gridHelper = new THREE.GridHelper(20, 20);
@@ -138,6 +149,25 @@ function StlViewer3D({
       
       // Start animation
       animate();
+      
+      // Add debug event listeners to canvas
+      const canvasElement = renderer.domElement;
+      canvasElement.addEventListener('mousedown', () => console.log('Canvas mousedown'));
+      canvasElement.addEventListener('mousemove', () => {
+        // Only log once per second to avoid flooding the console
+        if (Math.random() < 0.01) console.log('Canvas mousemove');
+      });
+      canvasElement.addEventListener('wheel', () => console.log('Canvas wheel'));
+      
+      // Force controls to capture pointer with the first click
+      const forceControlsActive = () => {
+        if (controlsRef.current) {
+          console.log('Forcing controls to be active');
+          controlsRef.current.update();
+        }
+        canvasElement.removeEventListener('mousedown', forceControlsActive);
+      };
+      canvasElement.addEventListener('mousedown', forceControlsActive);
       
       // Handle resize
       const handleResize = () => {
@@ -257,9 +287,19 @@ function StlViewer3D({
           // Position camera to view the whole model
           if (cameraRef.current && controlsRef.current) {
             const maxDimension = Math.max(size.x, size.y, size.z);
-            cameraRef.current.position.set(maxDimension * 2, maxDimension * 2, maxDimension * 2);
+            const distance = maxDimension * 2;
+            
+            // Position camera at a good viewing angle
+            cameraRef.current.position.set(distance, distance, distance);
+            
+            // Set the orbit controls to target the center of the model
             controlsRef.current.target.set(0, 0, 0);
+            
+            // Ensure the orbital controls are updated after changing the target
             controlsRef.current.update();
+            
+            console.log('Camera positioned at', cameraRef.current.position);
+            console.log('Controls targeting', controlsRef.current.target);
           }
           
           // Force a render
@@ -349,7 +389,23 @@ function StlViewer3D({
     <div 
       ref={containerRef} 
       className="w-full h-[400px] border rounded-md bg-gray-100"
-      style={{ position: 'relative' }}
+      style={{ 
+        position: 'relative',
+        touchAction: 'none', // Prevents touch scrolling interfering with controls
+        userSelect: 'none', // Prevents text selection while dragging
+        WebkitUserSelect: 'none',
+        cursor: stlFile ? 'grab' : 'default' // Shows grab cursor when model is loaded
+      }}
+      onMouseDown={() => {
+        if (containerRef.current) {
+          containerRef.current.style.cursor = 'grabbing';
+        }
+      }}
+      onMouseUp={() => {
+        if (containerRef.current) {
+          containerRef.current.style.cursor = stlFile ? 'grab' : 'default';
+        }
+      }}
     >
       {hasWebGLError && (
         <div className="absolute inset-0 flex items-center justify-center bg-red-100 text-red-600 p-4">
@@ -360,6 +416,12 @@ function StlViewer3D({
       {!stlFile && !hasWebGLError && (
         <div className="absolute inset-0 flex items-center justify-center text-gray-500">
           Load an STL file to view the 3D model
+        </div>
+      )}
+
+      {stlFile && isInitialized && (
+        <div className="absolute bottom-2 right-2 bg-white/75 px-2 py-1 text-xs rounded shadow">
+          Drag to rotate | Scroll to zoom | Shift+drag to pan
         </div>
       )}
     </div>
