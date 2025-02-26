@@ -31,6 +31,7 @@ export default function StlViewer3D({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [showSlicePlanes, setShowSlicePlanes] = useState<boolean>(true);
   const [showGrid, setShowGrid] = useState<boolean>(true);
+  const [showAllSlices, setShowAllSlices] = useState<boolean>(false);
   const initRef = useRef<boolean>(false);  // Use ref instead of state to avoid re-renders
   
   // Initialize the Three.js scene, camera, and renderer
@@ -323,10 +324,19 @@ export default function StlViewer3D({
     console.log("[StlViewer3D] Axis range:", { start: axisStart, end: axisEnd });
     console.log("[StlViewer3D] Layers count:", layers.length);
     
-    // Add planes for visualization (limit the number for performance)
-    const displayRange = 5;
-    const startIdx = Math.max(0, activeLayerIndex - displayRange);
-    const endIdx = Math.min(layers.length - 1, activeLayerIndex + displayRange);
+    // Determine which layers to render based on user preference
+    let startIdx, endIdx;
+    
+    if (showAllSlices) {
+      // Show all layers when "show all slices" is active
+      startIdx = 0;
+      endIdx = layers.length - 1;
+    } else {
+      // Otherwise limit to display range for performance
+      const displayRange = 5;
+      startIdx = Math.max(0, activeLayerIndex - displayRange);
+      endIdx = Math.min(layers.length - 1, activeLayerIndex + displayRange);
+    }
     
     for (let i = startIdx; i <= endIdx; i++) {
       const layer = layers[i];
@@ -370,7 +380,7 @@ export default function StlViewer3D({
     if (rendererRef.current && cameraRef.current) {
       rendererRef.current.render(scene, cameraRef.current);
     }
-  }, [layers, activeLayerIndex, axis, showSlicePlanes]);
+  }, [layers, activeLayerIndex, axis, showSlicePlanes, showAllSlices]);
   
   // Effect to update slice planes when layers, active layer, or axis changes
   useEffect(() => {
@@ -387,6 +397,11 @@ export default function StlViewer3D({
   // Toggle for showing/hiding grid
   const toggleGrid = useCallback(() => {
     setShowGrid(prev => !prev);
+  }, []);
+  
+  // Toggle for showing all slices vs display range
+  const toggleAllSlices = useCallback(() => {
+    setShowAllSlices(prev => !prev);
   }, []);
   
   // Effect to update grid visibility when showGrid changes
@@ -429,6 +444,14 @@ export default function StlViewer3D({
         >
           {showSlicePlanes ? 'Hide Slices' : 'Show Slices'}
         </button>
+        {showSlicePlanes && (
+          <button 
+            onClick={toggleAllSlices}
+            className={`px-2 py-1 text-xs rounded shadow ${showAllSlices ? 'bg-green-500 text-white' : 'bg-white/75 text-gray-700'}`}
+          >
+            {showAllSlices ? 'Show Range Only' : 'Show All Slices'}
+          </button>
+        )}
         <button 
           onClick={toggleGrid}
           className={`px-2 py-1 text-xs rounded shadow ${showGrid ? 'bg-blue-500 text-white' : 'bg-white/75 text-gray-700'}`}

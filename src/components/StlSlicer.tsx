@@ -146,6 +146,27 @@ export default function StlSlicer() {
     if (previewLayerIndex >= 0 && previewLayerIndex < layers.length) {
       const layer = layers[previewLayerIndex];
       
+      if (layer.paths.length === 0) {
+        // No paths to render
+        ctx.font = '16px sans-serif';
+        ctx.fillStyle = 'red';
+        ctx.textAlign = 'center';
+        ctx.fillText(
+          `No slice data at this layer (${layer.z.toFixed(2)}mm)`, 
+          canvas.width / 2, canvas.height / 2
+        );
+        
+        // Add the layer info
+        ctx.textAlign = 'left';
+        ctx.font = '12px sans-serif';
+        ctx.fillStyle = 'black';
+        ctx.fillText(
+          `Layer ${previewLayerIndex + 1}/${layers.length} - Height: ${layer.z.toFixed(2)}mm`, 
+          10, 20
+        );
+        return;
+      }
+      
       // Find the bounds of all paths to center them properly
       let minX = Number.MAX_VALUE;
       let maxX = Number.MIN_VALUE;
@@ -159,6 +180,28 @@ export default function StlSlicer() {
           minY = Math.min(minY, point.y);
           maxY = Math.max(maxY, point.y);
         }
+      }
+      
+      // Check if we have valid bounds
+      if (minX === Number.MAX_VALUE || maxX === Number.MIN_VALUE || 
+          minY === Number.MAX_VALUE || maxY === Number.MIN_VALUE) {
+        // Invalid bounds, no points to render
+        ctx.font = '16px sans-serif';
+        ctx.fillStyle = 'red';
+        ctx.textAlign = 'center';
+        ctx.fillText(
+          `Invalid path data for this layer`, 
+          canvas.width / 2, canvas.height / 2
+        );
+        
+        ctx.textAlign = 'left';
+        ctx.font = '12px sans-serif';
+        ctx.fillStyle = 'black';
+        ctx.fillText(
+          `Layer ${previewLayerIndex + 1}/${layers.length} - Height: ${layer.z.toFixed(2)}mm`, 
+          10, 20
+        );
+        return;
       }
       
       // Calculate model dimensions and scale factor
@@ -194,19 +237,28 @@ export default function StlSlicer() {
       ctx.fillStyle = 'rgba(200, 220, 255, 0.2)';
       ctx.lineWidth = 1 / scale;
       
+      let pathsRendered = 0;
+      
       for (const path of layer.paths) {
-        if (path.length < 3) continue;
+        // Skip paths with less than 2 points
+        if (path.length < 2) continue;
         
-        ctx.beginPath();
-        ctx.moveTo(path[0].x, path[0].y);
-        
-        for (let i = 1; i < path.length; i++) {
-          ctx.lineTo(path[i].x, path[i].y);
+        try {
+          ctx.beginPath();
+          ctx.moveTo(path[0].x, path[0].y);
+          
+          for (let i = 1; i < path.length; i++) {
+            ctx.lineTo(path[i].x, path[i].y);
+          }
+          
+          // Always close the path for rendering
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+          pathsRendered++;
+        } catch (error) {
+          console.error('Error rendering path:', error);
         }
-        
-        ctx.closePath();
-        ctx.fill();
-        ctx.stroke();
       }
       
       // Add text showing the current layer and its height
@@ -214,7 +266,7 @@ export default function StlSlicer() {
       ctx.font = '12px sans-serif';
       ctx.fillStyle = 'black';
       ctx.fillText(
-        `Layer ${previewLayerIndex + 1}/${layers.length} - Height: ${layer.z.toFixed(2)}mm`, 
+        `Layer ${previewLayerIndex + 1}/${layers.length} - Height: ${layer.z.toFixed(2)}mm (${pathsRendered} paths)`, 
         10, 20
       );
     }

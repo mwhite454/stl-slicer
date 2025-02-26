@@ -282,124 +282,382 @@ export class StlSlicer {
    * Convert 3D intersection points to 2D paths
    */
   private buildPaths(edges: Array<Array<THREE.Vector3>>, axis: Axis): Array<Array<THREE.Vector2>> {
-    if (edges.length === 0) return [];
+    if (edges.length === 0) {
+      console.warn('No edges found for this slice');
+      return [];
+    }
+    
+    console.log(`[StlSlicer] Building paths from ${edges.length} edges`);
 
     // Convert 3D points to 2D based on the slicing axis
-    const points2D: Array<Array<THREE.Vector2>> = edges.map(edge => {
-      return edge.map(point => {
-        if (!point || typeof point.x !== 'number' || typeof point.y !== 'number' || typeof point.z !== 'number') {
-          console.warn('Invalid point encountered:', point);
-          return new THREE.Vector2(0, 0); // Fallback to avoid errors
-        }
-        
-        if (axis === 'x') {
-          return new THREE.Vector2(point.y, point.z);
-        } else if (axis === 'y') {
-          return new THREE.Vector2(point.x, point.z);
-        } else {
-          return new THREE.Vector2(point.x, point.y);
-        }
-      });
-    });
+    const segments: Array<[THREE.Vector2, THREE.Vector2]> = [];
+    
+    // Process each edge and convert to 2D segment
+    for (const edge of edges) {
+      // Ensure the edge has exactly two points
+      if (edge.length !== 2 || !edge[0] || !edge[1]) {
+        console.warn('Skipping invalid edge:', edge);
+        continue;
+      }
+      
+      const p1 = this.convertTo2D(edge[0], axis);
+      const p2 = this.convertTo2D(edge[1], axis);
+      
+      // Avoid zero-length segments
+      if (p1.distanceTo(p2) > 0.0001) {
+        segments.push([p1, p2]);
+      }
+    }
 
-    // Connect the edges to form closed paths
-    const paths: Array<Array<THREE.Vector2>> = [];
-    const remainingEdges = [...points2D];
-
-    // Safety check for empty edges or invalid data
-    if (remainingEdges.length === 0) {
+    if (segments.length === 0) {
+      console.warn('No valid 2D segments generated');
       return [];
     }
 
-    let safetyCounter = 0;
-    const MAX_ITERATIONS = 10000; // Prevent infinite loops
+    // Construct a graph structure for intelligent path finding
+    interface Node {
+      position: THREE.Vector2;
+      connections: Set<number>; // Indices of connected nodes
+      used: boolean; // Flag to mark if this node has been used in a path
+    }
 
-    while (remainingEdges.length > 0 && safetyCounter < MAX_ITERATIONS) {
-      safetyCounter++;
-      
-      const currentPath: Array<THREE.Vector2> = [];
-      let currentEdge = remainingEdges.pop();
-      
-      if (!currentEdge || currentEdge.length < 2) {
-        continue; // Skip invalid edges
+    const nodes: Node[] = [];
+    const nodeMap = new Map<string, number>(); // Map point hash to index in nodes array
+    const TOLERANCE = 0.01;
+    
+    // Function to get a unique key for a point (for detecting duplicates)
+    const getPointKey = (point: THREE.Vector2) => {
+      return `${Math.round(point.x / TOLERANCE)},${Math.round(point.y / TOLERANCE)}`;
+    };
+    
+    // Function to get or create a node index
+    const getNodeIndex = (point: THREE.Vector2): number => {
+      const key = getPointKey(point);
+      if (nodeMap.has(key)) {
+        return nodeMap.get(key)!;
       }
-
-      currentPath.push(currentEdge[0], currentEdge[1]);
-
-      let foundConnection = true;
-      let pathSafetyCounter = 0;
-      const MAX_PATH_ITERATIONS = 1000; // Prevent excessive path building
       
-      while (foundConnection && remainingEdges.length > 0 && pathSafetyCounter < MAX_PATH_ITERATIONS) {
-        pathSafetyCounter++;
-        foundConnection = false;
+      const index = nodes.length;
+      nodes.push({
+        position: point.clone(),
+        connections: new Set<number>(),
+        used: false
+      });
+      nodeMap.set(key, index);
+      return index;
+    };
+    
+    // Build the graph from segments
+    for (const [p1, p2] of segments) {
+      const i1 = getNodeIndex(p1);
+      const i2 = getNodeIndex(p2);
+      
+      if (i1 !== i2) {  // Avoid self-loops
+        nodes[i1].connections.add(i2);
+        nodes[i2].connections.add(i1);
+      }
+    }
+    
+    console.log(`[StlSlicer] Built graph with ${nodes.length} nodes`);
+    
+    const paths: Array<Array<THREE.Vector2>> = [];
+    
+    // Specialized algorithm for detecting closed contours first
+    const findClosedContours = () => {
+      // First pass - try to find clean closed loops without any branches
+      for (let startIdx = 0; startIdx < nodes.length; startIdx++) {
+        if (nodes[startIdx].used) continue;
         
-        // Try to find the closest edge to connect
-        let closestIndex = -1;
-        let closestDistance = Number.MAX_VALUE;
-        let useFirstPoint = false; // Whether to use first or second point of the edge
+        // Only consider nodes with exactly 2 connections as starting points
+        // These are ideal for loops/circles
+        if (nodes[startIdx].connections.size !== 2) continue;
         
-        const lastPoint = currentPath[currentPath.length - 1];
-        if (!lastPoint) continue; // Skip if no last point
+        const path: Array<THREE.Vector2> = [nodes[startIdx].position.clone()];
+        nodes[startIdx].used = true;
         
-        for (let i = 0; i < remainingEdges.length; i++) {
-          const edge = remainingEdges[i];
-          if (!edge || edge.length < 2) continue; // Skip invalid edges
+        let currentIdx = startIdx;
+        let complete = false;
+        let length = 0;
+        
+        // Keep following the path until we return to start or hit a dead-end
+        while (!complete) {
+          const currentNode = nodes[currentIdx];
+          let nextIdx: number | null = null;
           
-          try {
-            const distance1 = lastPoint.distanceTo(edge[0]);
-            const distance2 = lastPoint.distanceTo(edge[1]);
-            
-            const EPSILON = 0.0001;
-            
-            if (distance1 < EPSILON && distance1 < closestDistance) {
-              closestIndex = i;
-              closestDistance = distance1;
-              useFirstPoint = true;
-            } else if (distance2 < EPSILON && distance2 < closestDistance) {
-              closestIndex = i;
-              closestDistance = distance2;
-              useFirstPoint = false;
+          // Find an unused connection
+          for (const connIdx of currentNode.connections) {
+            if (!nodes[connIdx].used) {
+              nextIdx = connIdx;
+              break;
             }
-          } catch (error) {
-            console.error('Error connecting paths:', error);
-            continue;
+          }
+          
+          // If no next node or we've visited all neighbors, check if path forms a loop
+          if (nextIdx === null) {
+            // Check if we can close the loop - are we connected to the start?
+            for (const connIdx of currentNode.connections) {
+              if (connIdx === startIdx) {
+                complete = true;
+                break;
+              }
+            }
+            break; // Exit the while loop, we're done with this path
+          }
+          
+          // Add the next point to the path and mark it as used
+          currentIdx = nextIdx;
+          path.push(nodes[currentIdx].position.clone());
+          nodes[currentIdx].used = true;
+          
+          // Calculate length so far
+          if (path.length > 1) {
+            length += path[path.length - 1].distanceTo(path[path.length - 2]);
+          }
+          
+          // If we found our way back to the start, we have a closed loop
+          if (currentIdx === startIdx) {
+            complete = true;
+          }
+          
+          // Safety check - don't let paths get too long
+          if (path.length > segments.length * 2) {
+            console.warn('Path is too long, breaking loop');
+            break;
           }
         }
         
-        // If we found a close edge, connect it
-        if (closestIndex !== -1) {
-          const edge = remainingEdges[closestIndex];
-          if (useFirstPoint) {
-            currentPath.push(edge[1]);
-          } else {
-            currentPath.push(edge[0]);
+        // If we completed a loop and it's not too small, add it to paths
+        if (complete && path.length >= 3 && length > 0.5) {
+          // Ensure the path is closed
+          if (path[0].distanceTo(path[path.length - 1]) > TOLERANCE) {
+            path.push(path[0].clone());
           }
-          remainingEdges.splice(closestIndex, 1);
-          foundConnection = true;
+          paths.push(path);
+        } else {
+          // If we didn't complete a loop, unmark these nodes so they can be used in other paths
+          for (let i = 0; i < path.length; i++) {
+            const nodeIdx = nodeMap.get(getPointKey(path[i]));
+            if (nodeIdx !== undefined) {
+              nodes[nodeIdx].used = false;
+            }
+          }
         }
       }
-
-      // Check if the path is closed (last point is close to first point)
-      const firstPoint = currentPath[0];
-      const lastPoint = currentPath[currentPath.length - 1];
+    };
+    
+    // Run the specialized contour detection
+    findClosedContours();
+    
+    // Second pass - handle any remaining segments
+    const handleRemainingSegments = () => {
+      const remaining = nodes.filter(node => !node.used);
+      if (remaining.length === 0) return;
       
-      if (firstPoint && lastPoint) {
-        const EPSILON = 0.0001;
-        const isPathClosed = firstPoint.distanceTo(lastPoint) < EPSILON;
+      console.log(`[StlSlicer] Processing ${remaining.length} remaining nodes`);
+      
+      // Helper function to find the best next node
+      const findBestNextNode = (currentIdx: number, visited: Set<number>): number | null => {
+        const currentNode = nodes[currentIdx];
+        let bestNextIdx: number | null = null;
+        let bestScore = Infinity;
         
-        // Add the path if it has at least 3 points and is closed
-        if (currentPath.length >= 3 && isPathClosed) {
-          paths.push(currentPath);
+        for (const nextIdx of currentNode.connections) {
+          if (visited.has(nextIdx)) continue;
+          if (nodes[nextIdx].used) continue;
+          
+          // Score based on number of connections (fewer is better)
+          const score = nodes[nextIdx].connections.size;
+          if (score < bestScore) {
+            bestScore = score;
+            bestNextIdx = nextIdx;
+          }
+        }
+        
+        return bestNextIdx;
+      };
+      
+      // Process remaining nodes
+      for (let i = 0; i < nodes.length; i++) {
+        if (nodes[i].used) continue;
+        
+        const path: Array<THREE.Vector2> = [nodes[i].position.clone()];
+        nodes[i].used = true;
+        
+        const visited = new Set<number>([i]);
+        let currentIdx = i;
+        let length = 0;
+        
+        // Extend the path in both directions
+        
+        // Forward direction
+        while (true) {
+          const nextIdx = findBestNextNode(currentIdx, visited);
+          if (nextIdx === null) break;
+          
+          path.push(nodes[nextIdx].position.clone());
+          nodes[nextIdx].used = true;
+          visited.add(nextIdx);
+          
+          // Calculate length
+          length += path[path.length - 1].distanceTo(path[path.length - 2]);
+          
+          currentIdx = nextIdx;
+        }
+        
+        // Backward direction (start from the original node again)
+        currentIdx = i;
+        const reversePath: Array<THREE.Vector2> = [];
+        
+        while (true) {
+          const nextIdx = findBestNextNode(currentIdx, visited);
+          if (nextIdx === null) break;
+          
+          reversePath.unshift(nodes[nextIdx].position.clone());
+          nodes[nextIdx].used = true;
+          visited.add(nextIdx);
+          
+          // Calculate length
+          if (reversePath.length > 0) {
+            length += nodes[nextIdx].position.distanceTo(
+              reversePath.length > 0 ? reversePath[0] : nodes[currentIdx].position
+            );
+          }
+          
+          currentIdx = nextIdx;
+        }
+        
+        // Combine paths: reversePath + original point + forward path
+        const fullPath = [...reversePath, ...path];
+        
+        // Only add paths with reasonable size and length
+        if (fullPath.length >= 3 && length > 0.5) {
+          // Check if it's a closed path
+          const first = fullPath[0];
+          const last = fullPath[fullPath.length - 1];
+          
+          if (first.distanceTo(last) < TOLERANCE) {
+            // Already closed
+            paths.push(fullPath);
+          } else {
+            // Check if we can close this path
+            const startNodeIdx = nodeMap.get(getPointKey(first));
+            const endNodeIdx = nodeMap.get(getPointKey(last));
+            
+            if (startNodeIdx !== undefined && endNodeIdx !== undefined &&
+                nodes[startNodeIdx].connections.has(endNodeIdx)) {
+              // Can be closed - it's a contour
+              paths.push([...fullPath, first.clone()]);
+            } else {
+              // Can't be closed properly - but still add as an open path if it's long enough
+              paths.push(fullPath);
+            }
+          }
+        }
+      }
+    };
+    
+    // Process any remaining segments
+    handleRemainingSegments();
+    
+    // If we didn't find any paths, try again with a simpler method
+    if (paths.length === 0) {
+      console.warn('[StlSlicer] Failed to find paths with advanced algorithm, trying fallback method');
+      
+      // Simple method: connect nearest segments
+      const allPoints: THREE.Vector2[] = [];
+      const usedIndices = new Set<number>();
+      
+      // Extract all points from segments
+      for (const [p1, p2] of segments) {
+        allPoints.push(p1.clone(), p2.clone());
+      }
+      
+      // Try to find paths by connecting closest points
+      while (usedIndices.size < allPoints.length) {
+        let startIdx = -1;
+        for (let i = 0; i < allPoints.length; i++) {
+          if (!usedIndices.has(i)) {
+            startIdx = i;
+            break;
+          }
+        }
+        
+        if (startIdx === -1) break;
+        
+        const path: THREE.Vector2[] = [allPoints[startIdx].clone()];
+        usedIndices.add(startIdx);
+        
+        let currentPoint = allPoints[startIdx];
+        while (true) {
+          let closestIdx = -1;
+          let closestDist = Infinity;
+          
+          // Find closest unused point
+          for (let i = 0; i < allPoints.length; i++) {
+            if (usedIndices.has(i)) continue;
+            
+            const dist = currentPoint.distanceTo(allPoints[i]);
+            if (dist < closestDist && dist < TOLERANCE * 10) {
+              closestDist = dist;
+              closestIdx = i;
+            }
+          }
+          
+          // No more close points found
+          if (closestIdx === -1) break;
+          
+          path.push(allPoints[closestIdx].clone());
+          usedIndices.add(closestIdx);
+          currentPoint = allPoints[closestIdx];
+          
+          // Check if path is getting too long
+          if (path.length > allPoints.length) {
+            console.warn('Fallback path is too long, breaking');
+            break;
+          }
+        }
+        
+        // Only add paths with at least 3 points
+        if (path.length >= 3) {
+          paths.push(path);
         }
       }
     }
-
-    if (safetyCounter >= MAX_ITERATIONS) {
-      console.warn('Maximum iterations reached when building paths');
+    
+    console.log(`[StlSlicer] Built ${paths.length} paths`);
+    
+    // Final cleanup - make sure all paths are properly closed
+    return paths.map(path => {
+      if (path.length < 3) return path;
+      
+      const first = path[0];
+      const last = path[path.length - 1];
+      
+      // If the path is not already closed, force-close it
+      if (first.distanceTo(last) > TOLERANCE) {
+        return [...path, first.clone()];
+      }
+      
+      return path;
+    });
+  }
+  
+  /**
+   * Helper function to convert a 3D point to 2D based on slicing axis
+   */
+  private convertTo2D(point: THREE.Vector3, axis: Axis): THREE.Vector2 {
+    if (!point || typeof point.x !== 'number' || typeof point.y !== 'number' || typeof point.z !== 'number') {
+      console.warn('Invalid point for 2D conversion:', point);
+      return new THREE.Vector2(0, 0);
     }
-
-    return paths;
+    
+    if (axis === 'x') {
+      return new THREE.Vector2(point.y, point.z);
+    } else if (axis === 'y') {
+      return new THREE.Vector2(point.x, point.z);
+    } else {
+      return new THREE.Vector2(point.x, point.y);
+    }
   }
 
   /**
@@ -416,6 +674,21 @@ export class StlSlicer {
     const width = Math.ceil(Math.max(size.x, size.y));
     const height = Math.ceil(Math.max(size.x, size.y));
 
+    // Check if we have any valid paths
+    if (layer.paths.length === 0) {
+      console.warn(`[StlSlicer] No paths for layer ${layer.index} at z=${layer.z}`);
+      // Return an empty SVG with a message
+      return `<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg width="${width}mm" height="${height}mm" viewBox="0 0 ${width} ${height}" 
+     xmlns="http://www.w3.org/2000/svg">
+<g transform="translate(${width/2}, ${height/2})">
+  <text x="0" y="0" text-anchor="middle" font-size="3" fill="red">
+    No slice data at this layer (${layer.z.toFixed(2)}mm)
+  </text>
+</g>
+</svg>`;
+    }
+
     // SVG header
     let svg = `<?xml version="1.0" encoding="UTF-8" standalone="no"?>
 <svg width="${width}mm" height="${height}mm" viewBox="0 0 ${width} ${height}" 
@@ -423,26 +696,26 @@ export class StlSlicer {
 <g transform="translate(${width/2}, ${height/2})">`;
 
     // Add each path as a polyline
+    let pathCount = 0;
     for (const path of layer.paths) {
       // Skip paths with less than 3 points (they can't form proper polygons)
       if (path.length < 3) continue;
       
-      // Check if path is properly closed (first and last points are close)
-      const firstPoint = path[0];
-      const lastPoint = path[path.length - 1];
-      const EPSILON = 0.0001;
-      
-      if (firstPoint.distanceTo(lastPoint) > EPSILON) {
-        // Skip unclosed paths
-        continue;
-      }
-      
+      // No need to check if closed - we already ensured this in buildPaths
       const pathData = path.map((point, index) => 
         `${index === 0 ? 'M' : 'L'}${point.x.toFixed(3)},${point.y.toFixed(3)}`
       ).join(' ') + 'Z';
 
       svg += `
   <path d="${pathData}" fill="none" stroke="black" stroke-width="0.1" />`;
+      pathCount++;
+    }
+
+    if (pathCount === 0) {
+      svg += `
+  <text x="0" y="0" text-anchor="middle" font-size="3" fill="red">
+    All paths were invalid for this layer
+  </text>`;
     }
 
     // SVG footer
