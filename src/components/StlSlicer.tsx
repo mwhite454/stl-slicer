@@ -340,7 +340,11 @@ export default function StlSlicer() {
         <div className="w-full">
           {viewMode === '3d' ? (
             <>
-              <div className="relative w-full" style={{ zIndex: 10 }}>
+              <div className="relative w-full" style={{ 
+                zIndex: 10, 
+                height: '400px',
+                pointerEvents: 'auto'
+              }}>
                 <StlViewer3D
                   stlFile={file}
                   layers={layers}

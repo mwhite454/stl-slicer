@@ -1,9 +1,10 @@
 /* Existing CSS */
 
-/* Add global rules for 3D canvas interactions */
+/* Three.js specific styling */
 canvas {
   touch-action: none !important;
   outline: none !important;
+  display: block !important;
 }
 
 .three-container {
@@ -12,6 +13,9 @@ canvas {
   position: relative;
   cursor: grab;
   user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  overflow: hidden;
 }
 
 .three-container:active {
