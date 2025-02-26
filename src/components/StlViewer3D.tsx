@@ -35,35 +35,12 @@ function StlViewer3D({
   const [modelDimensions, setModelDimensions] = useState<{ width: number; height: number; depth: number } | null>(null);
   const [hasWebGLError, setHasWebGLError] = useState(false);
 
-  // Debug function to check WebGL capabilities
-  const checkWebGLSupport = (): boolean => {
-    try {
-      const canvas = document.createElement('canvas');
-      const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
-      
-      if (!gl) {
-        console.error('WebGL not supported');
-        return false;
-      }
-      
-      return true;
-    } catch (e) {
-      console.error('Error checking WebGL support:', e);
-      return false;
-    }
-  };
-
   // Initialize the 3D scene
   useEffect(() => {
     if (!containerRef.current || isInitialized) return;
     
-    // Check WebGL support first
-    if (!checkWebGLSupport()) {
-      setHasWebGLError(true);
-      return;
-    }
-    
     try {
+      console.log('Initializing 3D scene');
       const container = containerRef.current;
       
       // Create scene
@@ -89,42 +66,62 @@ function StlViewer3D({
       camera.position.set(10, 10, 10);
       cameraRef.current = camera;
       
-      // Create renderer with explicit canvas
-      const canvas = document.createElement('canvas');
-      const renderer = new THREE.WebGLRenderer({ 
-        canvas,
+      // Create renderer directly with the container DOM element
+      const renderer = new THREE.WebGLRenderer({
         antialias: true,
         alpha: true
       });
+      
+      // Setup renderer
       renderer.setSize(container.clientWidth, container.clientHeight);
       renderer.setPixelRatio(window.devicePixelRatio);
       
-      // Clear any existing children first
+      // Clear any existing children
       while (container.firstChild) {
         container.removeChild(container.firstChild);
       }
       
+      // Add the renderer canvas to DOM
       container.appendChild(renderer.domElement);
       rendererRef.current = renderer;
       
+      console.log('Renderer created and added to DOM');
+      
       // Add orbit controls
       const controls = new OrbitControls(camera, renderer.domElement);
+      
+      // Configure controls with optimal settings for interaction
       controls.enableDamping = true;
-      controls.dampingFactor = 0.25;
-      controls.enableZoom = true;
-      controls.zoomSpeed = 1.2;
-      controls.enablePan = true;
-      controls.panSpeed = 0.8;
+      controls.dampingFactor = 0.1;
+      controls.screenSpacePanning = true;
       controls.enableRotate = true;
-      controls.rotateSpeed = 1.0;
-      controls.target.set(0, 0, 0);
+      controls.rotateSpeed = 0.7;
+      controls.enableZoom = true;
+      controls.zoomSpeed = 0.9;
+      controls.enablePan = true;
+      controls.panSpeed = 0.5;
       controls.minDistance = 0.1;
-      controls.maxDistance = 1000;
+      controls.maxDistance = 500;
+      controls.target.set(0, 0, 0);
+      
+      // Force an update to apply settings
       controls.update();
+      
+      // Store controls reference
       controlsRef.current = controls;
       
-      // Log that controls are initialized for debugging
-      console.log('OrbitControls initialized', controls);
+      // Log control events for debugging
+      renderer.domElement.addEventListener('pointerdown', () => {
+        console.log('Pointer down - controls enabled:', controls.enabled);
+      });
+      
+      renderer.domElement.addEventListener('pointermove', (e) => {
+        if (e.buttons > 0 && Math.random() < 0.05) {
+          console.log('Dragging with buttons:', e.buttons);
+        }
+      });
+      
+      console.log('OrbitControls initialized');
       
       // Add grid for reference
       const gridHelper = new THREE.GridHelper(20, 20);
@@ -150,25 +147,6 @@ function StlViewer3D({
       // Start animation
       animate();
       
-      // Add debug event listeners to canvas
-      const canvasElement = renderer.domElement;
-      canvasElement.addEventListener('mousedown', () => console.log('Canvas mousedown'));
-      canvasElement.addEventListener('mousemove', () => {
-        // Only log once per second to avoid flooding the console
-        if (Math.random() < 0.01) console.log('Canvas mousemove');
-      });
-      canvasElement.addEventListener('wheel', () => console.log('Canvas wheel'));
-      
-      // Force controls to capture pointer with the first click
-      const forceControlsActive = () => {
-        if (controlsRef.current) {
-          console.log('Forcing controls to be active');
-          controlsRef.current.update();
-        }
-        canvasElement.removeEventListener('mousedown', forceControlsActive);
-      };
-      canvasElement.addEventListener('mousedown', forceControlsActive);
-      
       // Handle resize
       const handleResize = () => {
         if (!cameraRef.current || !rendererRef.current || !containerRef.current) return;
@@ -187,6 +165,7 @@ function StlViewer3D({
       
       // Cleanup
       return () => {
+        console.log('Cleaning up 3D scene');
         window.removeEventListener('resize', handleResize);
         
         if (animationFrameRef.current) {
@@ -388,24 +367,11 @@ function StlViewer3D({
   return (
     <div 
       ref={containerRef} 
-      className="w-full h-[400px] border rounded-md bg-gray-100"
+      className="w-full h-[400px] border rounded-md bg-gray-100 three-container"
       style={{ 
-        position: 'relative',
-        touchAction: 'none', // Prevents touch scrolling interfering with controls
-        userSelect: 'none', // Prevents text selection while dragging
-        WebkitUserSelect: 'none',
-        cursor: stlFile ? 'grab' : 'default' // Shows grab cursor when model is loaded
+        position: 'relative'
       }}
-      onMouseDown={() => {
-        if (containerRef.current) {
-          containerRef.current.style.cursor = 'grabbing';
-        }
-      }}
-      onMouseUp={() => {
-        if (containerRef.current) {
-          containerRef.current.style.cursor = stlFile ? 'grab' : 'default';
-        }
-      }}
+      tabIndex={0} // Make sure the container can receive focus for keyboard events
     >
       {hasWebGLError && (
         <div className="absolute inset-0 flex items-center justify-center bg-red-100 text-red-600 p-4">

@@ -340,13 +340,15 @@ export default function StlSlicer() {
         <div className="w-full">
           {viewMode === '3d' ? (
             <>
-              <StlViewer3D
-                stlFile={file}
-                layers={layers}
-                axis={axis}
-                layerThickness={layerThickness}
-                activeLayerIndex={previewLayerIndex}
-              />
+              <div className="relative w-full" style={{ zIndex: 10 }}>
+                <StlViewer3D
+                  stlFile={file}
+                  layers={layers}
+                  axis={axis}
+                  layerThickness={layerThickness}
+                  activeLayerIndex={previewLayerIndex}
+                />
+              </div>
               {file && (
                 <div className="mt-2 p-2 bg-blue-50 rounded-md text-sm">
                   <p className="font-medium">3D Model Controls:</p>

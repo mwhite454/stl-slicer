@@ -1,0 +1,19 @@
+/* Existing CSS */
+
+/* Add global rules for 3D canvas interactions */
+canvas {
+  touch-action: none !important;
+  outline: none !important;
+}
+
+.three-container {
+  touch-action: none;
+  outline: none;
+  position: relative;
+  cursor: grab;
+  user-select: none;
+}
+
+.three-container:active {
+  cursor: grabbing;
+} 
