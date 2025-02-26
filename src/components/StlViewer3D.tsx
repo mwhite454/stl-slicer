@@ -29,106 +29,186 @@ function StlViewer3D({
   const controlsRef = useRef<OrbitControls | null>(null);
   const modelRef = useRef<THREE.Mesh | null>(null);
   const slicePlanesRef = useRef<THREE.Mesh[]>([]);
+  const animationFrameRef = useRef<number | null>(null);
   
   const [isInitialized, setIsInitialized] = useState(false);
   const [modelDimensions, setModelDimensions] = useState<{ width: number; height: number; depth: number } | null>(null);
+  const [hasWebGLError, setHasWebGLError] = useState(false);
+
+  // Debug function to check WebGL capabilities
+  const checkWebGLSupport = (): boolean => {
+    try {
+      const canvas = document.createElement('canvas');
+      const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+      
+      if (!gl) {
+        console.error('WebGL not supported');
+        return false;
+      }
+      
+      return true;
+    } catch (e) {
+      console.error('Error checking WebGL support:', e);
+      return false;
+    }
+  };
 
   // Initialize the 3D scene
   useEffect(() => {
     if (!containerRef.current || isInitialized) return;
     
-    const container = containerRef.current;
+    // Check WebGL support first
+    if (!checkWebGLSupport()) {
+      setHasWebGLError(true);
+      return;
+    }
     
-    // Create scene
-    const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0xf0f0f0);
-    sceneRef.current = scene;
-    
-    // Add lighting
-    const ambientLight = new THREE.AmbientLight(0x888888);
-    scene.add(ambientLight);
-    
-    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-    directionalLight.position.set(1, 1, 1);
-    scene.add(directionalLight);
-    
-    // Create camera
-    const camera = new THREE.PerspectiveCamera(
-      75, 
-      container.clientWidth / container.clientHeight, 
-      0.1, 
-      1000
-    );
-    camera.position.set(10, 10, 10);
-    cameraRef.current = camera;
-    
-    // Create renderer
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(container.clientWidth, container.clientHeight);
-    renderer.setPixelRatio(window.devicePixelRatio);
-    container.appendChild(renderer.domElement);
-    rendererRef.current = renderer;
-    
-    // Add orbit controls
-    const controls = new OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true;
-    controlsRef.current = controls;
-    
-    // Add grid for reference
-    const gridHelper = new THREE.GridHelper(20, 20);
-    scene.add(gridHelper);
-    
-    // Add axes helper
-    const axesHelper = new THREE.AxesHelper(5);
-    scene.add(axesHelper);
-    
-    // Animation loop
-    const animate = () => {
-      requestAnimationFrame(animate);
-      
-      if (controlsRef.current) {
-        controlsRef.current.update();
-      }
-      
-      if (rendererRef.current && sceneRef.current && cameraRef.current) {
-        rendererRef.current.render(sceneRef.current, cameraRef.current);
-      }
-    };
-    
-    animate();
-    
-    // Handle resize
-    const handleResize = () => {
-      if (!cameraRef.current || !rendererRef.current || !containerRef.current) return;
-      
+    try {
       const container = containerRef.current;
-      cameraRef.current.aspect = container.clientWidth / container.clientHeight;
-      cameraRef.current.updateProjectionMatrix();
-      rendererRef.current.setSize(container.clientWidth, container.clientHeight);
-    };
-    
-    window.addEventListener('resize', handleResize);
-    
-    setIsInitialized(true);
-    
-    // Cleanup
-    return () => {
-      window.removeEventListener('resize', handleResize);
       
-      if (rendererRef.current && containerRef.current) {
-        containerRef.current.removeChild(rendererRef.current.domElement);
-        rendererRef.current.dispose();
+      // Create scene
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0xf0f0f0);
+      sceneRef.current = scene;
+      
+      // Add lighting
+      const ambientLight = new THREE.AmbientLight(0x888888);
+      scene.add(ambientLight);
+      
+      const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+      directionalLight.position.set(1, 1, 1);
+      scene.add(directionalLight);
+      
+      // Create camera
+      const camera = new THREE.PerspectiveCamera(
+        75, 
+        container.clientWidth / container.clientHeight, 
+        0.1, 
+        1000
+      );
+      camera.position.set(10, 10, 10);
+      cameraRef.current = camera;
+      
+      // Create renderer with explicit canvas
+      const canvas = document.createElement('canvas');
+      const renderer = new THREE.WebGLRenderer({ 
+        canvas,
+        antialias: true,
+        alpha: true
+      });
+      renderer.setSize(container.clientWidth, container.clientHeight);
+      renderer.setPixelRatio(window.devicePixelRatio);
+      
+      // Clear any existing children first
+      while (container.firstChild) {
+        container.removeChild(container.firstChild);
       }
-    };
+      
+      container.appendChild(renderer.domElement);
+      rendererRef.current = renderer;
+      
+      // Add orbit controls
+      const controls = new OrbitControls(camera, renderer.domElement);
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.1;
+      controls.enableZoom = true;
+      controls.enablePan = true;
+      controlsRef.current = controls;
+      
+      // Add grid for reference
+      const gridHelper = new THREE.GridHelper(20, 20);
+      scene.add(gridHelper);
+      
+      // Add axes helper
+      const axesHelper = new THREE.AxesHelper(5);
+      scene.add(axesHelper);
+      
+      // Animation loop
+      const animate = () => {
+        animationFrameRef.current = requestAnimationFrame(animate);
+        
+        if (controlsRef.current) {
+          controlsRef.current.update();
+        }
+        
+        if (rendererRef.current && sceneRef.current && cameraRef.current) {
+          rendererRef.current.render(sceneRef.current, cameraRef.current);
+        }
+      };
+      
+      // Start animation
+      animate();
+      
+      // Handle resize
+      const handleResize = () => {
+        if (!cameraRef.current || !rendererRef.current || !containerRef.current) return;
+        
+        const container = containerRef.current;
+        cameraRef.current.aspect = container.clientWidth / container.clientHeight;
+        cameraRef.current.updateProjectionMatrix();
+        rendererRef.current.setSize(container.clientWidth, container.clientHeight);
+      };
+      
+      window.addEventListener('resize', handleResize);
+      setIsInitialized(true);
+      
+      // Force a resize after initialization to ensure correct dimensions
+      setTimeout(handleResize, 100);
+      
+      // Cleanup
+      return () => {
+        window.removeEventListener('resize', handleResize);
+        
+        if (animationFrameRef.current) {
+          cancelAnimationFrame(animationFrameRef.current);
+        }
+        
+        if (rendererRef.current) {
+          rendererRef.current.dispose();
+        }
+        
+        // Dispose all resources
+        if (modelRef.current?.geometry) {
+          modelRef.current.geometry.dispose();
+        }
+        
+        slicePlanesRef.current.forEach(plane => {
+          if (plane.geometry) plane.geometry.dispose();
+          if (plane.material) {
+            if (Array.isArray(plane.material)) {
+              plane.material.forEach(m => m.dispose());
+            } else {
+              plane.material.dispose();
+            }
+          }
+        });
+      };
+    } catch (error) {
+      console.error('Error initializing 3D scene:', error);
+      setHasWebGLError(true);
+    }
   }, [isInitialized]);
   
   // Load STL file
   useEffect(() => {
     if (!isInitialized || !stlFile || !sceneRef.current) return;
     
+    // Show loading message in console
+    console.log('Loading STL file:', stlFile.name);
+    
     // Remove previous model if it exists
     if (modelRef.current && sceneRef.current) {
       sceneRef.current.remove(modelRef.current);
+      if (modelRef.current.geometry) {
+        modelRef.current.geometry.dispose();
+      }
+      if (modelRef.current.material) {
+        if (Array.isArray(modelRef.current.material)) {
+          modelRef.current.material.forEach(m => m.dispose());
+        } else {
+          modelRef.current.material.dispose();
+        }
+      }
       modelRef.current = null;
     }
     
@@ -138,6 +218,7 @@ function StlViewer3D({
     reader.onload = (event) => {
       if (event.target?.result && sceneRef.current) {
         try {
+          console.log('Parsing STL data...');
           const geometry = loader.parse(event.target.result as ArrayBuffer);
           
           // Create a mesh with semi-transparent material
@@ -147,6 +228,7 @@ function StlViewer3D({
             shininess: 200,
             opacity: 0.8,
             transparent: true,
+            side: THREE.DoubleSide
           });
           
           const mesh = new THREE.Mesh(geometry, material);
@@ -168,6 +250,7 @@ function StlViewer3D({
           });
           
           // Add the model to the scene
+          console.log('Adding model to scene');
           sceneRef.current.add(mesh);
           modelRef.current = mesh;
           
@@ -178,10 +261,19 @@ function StlViewer3D({
             controlsRef.current.target.set(0, 0, 0);
             controlsRef.current.update();
           }
+          
+          // Force a render
+          if (rendererRef.current && sceneRef.current && cameraRef.current) {
+            rendererRef.current.render(sceneRef.current, cameraRef.current);
+          }
         } catch (error) {
           console.error('Error parsing STL file:', error);
         }
       }
+    };
+    
+    reader.onerror = (error) => {
+      console.error('Error reading STL file:', error);
     };
     
     reader.readAsArrayBuffer(stlFile);
@@ -259,7 +351,13 @@ function StlViewer3D({
       className="w-full h-[400px] border rounded-md bg-gray-100"
       style={{ position: 'relative' }}
     >
-      {!stlFile && (
+      {hasWebGLError && (
+        <div className="absolute inset-0 flex items-center justify-center bg-red-100 text-red-600 p-4">
+          WebGL not supported or error initializing renderer. Try using a different browser.
+        </div>
+      )}
+      
+      {!stlFile && !hasWebGLError && (
         <div className="absolute inset-0 flex items-center justify-center text-gray-500">
           Load an STL file to view the 3D model
         </div>

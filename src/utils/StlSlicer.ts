@@ -316,12 +316,17 @@ export class StlSlicer {
         pathSafetyCounter++;
         foundConnection = false;
         
+        // Try to find the closest edge to connect
+        let closestIndex = -1;
+        let closestDistance = Number.MAX_VALUE;
+        let useFirstPoint = false; // Whether to use first or second point of the edge
+        
+        const lastPoint = currentPath[currentPath.length - 1];
+        if (!lastPoint) continue; // Skip if no last point
+        
         for (let i = 0; i < remainingEdges.length; i++) {
           const edge = remainingEdges[i];
           if (!edge || edge.length < 2) continue; // Skip invalid edges
-          
-          const lastPoint = currentPath[currentPath.length - 1];
-          if (!lastPoint) continue; // Skip if no last point
           
           try {
             const distance1 = lastPoint.distanceTo(edge[0]);
@@ -329,27 +334,46 @@ export class StlSlicer {
             
             const EPSILON = 0.0001;
             
-            if (distance1 < EPSILON) {
-              currentPath.push(edge[1]);
-              remainingEdges.splice(i, 1);
-              foundConnection = true;
-              break;
-            } else if (distance2 < EPSILON) {
-              currentPath.push(edge[0]);
-              remainingEdges.splice(i, 1);
-              foundConnection = true;
-              break;
+            if (distance1 < EPSILON && distance1 < closestDistance) {
+              closestIndex = i;
+              closestDistance = distance1;
+              useFirstPoint = true;
+            } else if (distance2 < EPSILON && distance2 < closestDistance) {
+              closestIndex = i;
+              closestDistance = distance2;
+              useFirstPoint = false;
             }
           } catch (error) {
             console.error('Error connecting paths:', error);
             continue;
           }
         }
+        
+        // If we found a close edge, connect it
+        if (closestIndex !== -1) {
+          const edge = remainingEdges[closestIndex];
+          if (useFirstPoint) {
+            currentPath.push(edge[1]);
+          } else {
+            currentPath.push(edge[0]);
+          }
+          remainingEdges.splice(closestIndex, 1);
+          foundConnection = true;
+        }
       }
 
-      // Add the path if it has at least 3 points (to form a polygon)
-      if (currentPath.length >= 3) {
-        paths.push(currentPath);
+      // Check if the path is closed (last point is close to first point)
+      const firstPoint = currentPath[0];
+      const lastPoint = currentPath[currentPath.length - 1];
+      
+      if (firstPoint && lastPoint) {
+        const EPSILON = 0.0001;
+        const isPathClosed = firstPoint.distanceTo(lastPoint) < EPSILON;
+        
+        // Add the path if it has at least 3 points and is closed
+        if (currentPath.length >= 3 && isPathClosed) {
+          paths.push(currentPath);
+        }
       }
     }
 
@@ -382,8 +406,21 @@ export class StlSlicer {
 
     // Add each path as a polyline
     for (const path of layer.paths) {
+      // Skip paths with less than 3 points (they can't form proper polygons)
+      if (path.length < 3) continue;
+      
+      // Check if path is properly closed (first and last points are close)
+      const firstPoint = path[0];
+      const lastPoint = path[path.length - 1];
+      const EPSILON = 0.0001;
+      
+      if (firstPoint.distanceTo(lastPoint) > EPSILON) {
+        // Skip unclosed paths
+        continue;
+      }
+      
       const pathData = path.map((point, index) => 
-        `${index === 0 ? 'M' : 'L'}${point.x},${point.y}`
+        `${index === 0 ? 'M' : 'L'}${point.x.toFixed(3)},${point.y.toFixed(3)}`
       ).join(' ') + 'Z';
 
       svg += `

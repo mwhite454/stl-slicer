@@ -124,17 +124,56 @@ export default function StlSlicer() {
     if (previewLayerIndex >= 0 && previewLayerIndex < layers.length) {
       const layer = layers[previewLayerIndex];
       
+      // Find the bounds of all paths to center them properly
+      let minX = Number.MAX_VALUE;
+      let maxX = Number.MIN_VALUE;
+      let minY = Number.MAX_VALUE;
+      let maxY = Number.MIN_VALUE;
+      
+      for (const path of layer.paths) {
+        for (const point of path) {
+          minX = Math.min(minX, point.x);
+          maxX = Math.max(maxX, point.x);
+          minY = Math.min(minY, point.y);
+          maxY = Math.max(maxY, point.y);
+        }
+      }
+      
+      // Calculate model dimensions and scale factor
+      const modelWidth = maxX - minX;
+      const modelHeight = maxY - minY;
+      const modelCenterX = (minX + maxX) / 2;
+      const modelCenterY = (minY + maxY) / 2;
+      
+      const canvasRatio = canvas.width / canvas.height;
+      const modelRatio = modelWidth / modelHeight;
+      
+      let scale;
+      if (modelRatio > canvasRatio) {
+        scale = (canvas.width * 0.9) / modelWidth;
+      } else {
+        scale = (canvas.height * 0.9) / modelHeight;
+      }
+      
       // Set canvas transform
       ctx.save();
       ctx.translate(canvas.width / 2, canvas.height / 2);
-      ctx.scale(5, 5); // Scale up for better visibility
+      ctx.scale(scale, scale); // Scale based on model size
+      ctx.translate(-modelCenterX, -modelCenterY); // Center the model
+      
+      // Draw a border around the slice area
+      ctx.strokeStyle = '#ddd';
+      ctx.lineWidth = 0.5 / scale;
+      ctx.strokeRect(minX - 5 / scale, minY - 5 / scale, 
+                     (maxX - minX) + 10 / scale, (maxY - minY) + 10 / scale);
       
       // Draw paths
       ctx.strokeStyle = 'black';
-      ctx.lineWidth = 0.5;
+      ctx.fillStyle = 'rgba(200, 220, 255, 0.2)';
+      ctx.lineWidth = 1 / scale;
       
       for (const path of layer.paths) {
-        if (path.length < 2) continue;
+        if (path.length < 3) continue;
         
         ctx.beginPath();
         ctx.moveTo(path[0].x, path[0].y);
@@ -144,10 +183,18 @@ export default function StlSlicer() {
         }
         
         ctx.closePath();
+        ctx.fill();
         ctx.stroke();
       }
       
+      // Add text showing the current layer and its height
       ctx.restore();
+      ctx.font = '12px sans-serif';
+      ctx.fillStyle = 'black';
+      ctx.fillText(
+        `Layer ${previewLayerIndex + 1}/${layers.length} - Height: ${layer.z.toFixed(2)}mm`, 
+        10, 20
+      );
     }
   }, [layers, previewLayerIndex, isClientSide]);
   
