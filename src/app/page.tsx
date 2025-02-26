@@ -9,7 +9,7 @@ const StlSlicerClient = dynamic(() => import('../components/StlSlicer'), {
 
 export default function Home() {
   return (
-    <div className="container mx-auto py-8">
+    <div className="h-screen w-full overflow-hidden">
       <StlSlicerClient />
     </div>
   );

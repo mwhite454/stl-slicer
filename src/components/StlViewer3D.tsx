@@ -33,6 +33,42 @@ export default function StlViewer3D({
   const [showGrid, setShowGrid] = useState<boolean>(true);
   const [showAllSlices, setShowAllSlices] = useState<boolean>(false);
   const initRef = useRef<boolean>(false);  // Use ref instead of state to avoid re-renders
+  const resizeObserverRef = useRef<ResizeObserver | null>(null);
+  
+  // Toggle visibility functions
+  const toggleGrid = useCallback(() => {
+    setShowGrid(prev => !prev);
+    if (gridHelperRef.current) {
+      gridHelperRef.current.visible = !showGrid;
+    }
+  }, [showGrid]);
+  
+  const toggleSlicePlanes = useCallback(() => {
+    setShowSlicePlanes(prev => !prev);
+    
+    if (sceneRef.current) {
+      sceneRef.current.traverse((object) => {
+        if (object.userData && object.userData.isSliceVisual) {
+          object.visible = !showSlicePlanes;
+        }
+      });
+    }
+  }, [showSlicePlanes]);
+  
+  const toggleAllSlices = useCallback(() => {
+    setShowAllSlices(prev => !prev);
+    
+    if (sceneRef.current) {
+      sceneRef.current.traverse((object) => {
+        if (object.userData && object.userData.isSliceVisual) {
+          const sliceIndex = object.userData.sliceIndex;
+          if (sliceIndex !== undefined) {
+            object.visible = showAllSlices || sliceIndex === activeLayerIndex;
+          }
+        }
+      });
+    }
+  }, [showAllSlices, activeLayerIndex]);
   
   // Initialize the Three.js scene, camera, and renderer
   useEffect(() => {
@@ -109,18 +145,41 @@ export default function StlViewer3D({
       axesHelper.userData = { isHelper: true };
       scene.add(axesHelper);
       
-      // Handle window resize
+      // Handle resize with ResizeObserver for better accuracy
       const handleResize = () => {
         if (!containerRef.current || !canvasRef.current || !renderer || !camera) return;
         
         const canvas = canvasRef.current;
-        const width = canvas.clientWidth || 300;
-        const height = canvas.clientHeight || 200;
+        const container = containerRef.current;
         
+        // Get the actual dimensions of the container
+        const width = container.clientWidth;
+        const height = container.clientHeight;
+        
+        if (width === 0 || height === 0) return; // Skip invalid dimensions
+        
+        // Update the canvas size to match the container
+        canvas.style.width = `${width}px`;
+        canvas.style.height = `${height}px`;
+        
+        // Update camera and renderer
         camera.aspect = width / height;
         camera.updateProjectionMatrix();
         renderer.setSize(width, height);
       };
+      
+      // Setup ResizeObserver for more accurate size tracking
+      if (containerRef.current && typeof ResizeObserver !== 'undefined') {
+        const resizeObserver = new ResizeObserver(() => {
+          requestAnimationFrame(handleResize);
+        });
+        
+        resizeObserver.observe(containerRef.current);
+        resizeObserverRef.current = resizeObserver;
+      }
+      
+      // Initial resize
+      handleResize();
       
       // Animation loop
       let animFrameId: number;
@@ -136,7 +195,7 @@ export default function StlViewer3D({
       // Start animation
       animate();
       
-      // Add resize listener
+      // Also listen to window resize events as a fallback
       window.addEventListener('resize', handleResize);
       
       // Mark as initialized using ref (not state)
@@ -148,23 +207,43 @@ export default function StlViewer3D({
         cancelAnimationFrame(animFrameId);
         window.removeEventListener('resize', handleResize);
         
-        // Clear references
-        sceneRef.current = null;
-        rendererRef.current = null;
-        cameraRef.current = null;
-        controlsRef.current = null;
-        gridHelperRef.current = null;
+        if (resizeObserverRef.current) {
+          resizeObserverRef.current.disconnect();
+        }
         
-        // Dispose renderer
-        if (renderer) renderer.dispose();
+        if (rendererRef.current) {
+          rendererRef.current.dispose();
+        }
         
-        initRef.current = false;
+        // Clean up the scene
+        if (sceneRef.current) {
+          sceneRef.current.traverse((object) => {
+            if (object instanceof THREE.Mesh) {
+              if (object.geometry) {
+                object.geometry.dispose();
+              }
+              
+              if (object.material) {
+                if (Array.isArray(object.material)) {
+                  object.material.forEach(material => material.dispose());
+                } else {
+                  object.material.dispose();
+                }
+              }
+            }
+          });
+          
+          // Explicitly remove all objects from the scene
+          while (sceneRef.current.children.length > 0) {
+            sceneRef.current.remove(sceneRef.current.children[0]);
+          }
+        }
       };
     } catch (error) {
-      console.error("[StlViewer3D] Error initializing:", error);
-      setErrorMessage("Failed to initialize 3D viewer");
+      console.error("[StlViewer3D] Error setting up scene:", error);
+      setErrorMessage("Failed to initialize 3D viewer. Please try reloading the page.");
     }
-  }, []); // Empty dependency array since we're using ref for initialization status
+  }, []);
   
   // Load STL file when it changes
   useEffect(() => {
@@ -389,75 +468,47 @@ export default function StlViewer3D({
     }
   }, [renderSlicePlanes]);
   
-  // Toggle for showing/hiding slice planes
-  const toggleSlicePlanes = useCallback(() => {
-    setShowSlicePlanes(prev => !prev);
-  }, []);
-  
-  // Toggle for showing/hiding grid
-  const toggleGrid = useCallback(() => {
-    setShowGrid(prev => !prev);
-  }, []);
-  
-  // Toggle for showing all slices vs display range
-  const toggleAllSlices = useCallback(() => {
-    setShowAllSlices(prev => !prev);
-  }, []);
-  
-  // Effect to update grid visibility when showGrid changes
-  useEffect(() => {
-    if (gridHelperRef.current) {
-      gridHelperRef.current.visible = showGrid;
-      if (rendererRef.current && cameraRef.current && sceneRef.current) {
-        rendererRef.current.render(sceneRef.current, cameraRef.current);
-      }
-    }
-  }, [showGrid]);
-  
   return (
     <div 
       ref={containerRef}
-      className="w-full h-[400px] border rounded-md bg-gray-100 three-container relative"
+      className="w-full h-full relative"
       style={{ touchAction: 'none' }}
     >
       <canvas 
         ref={canvasRef} 
-        className="w-full h-full block"
+        className="w-full h-full outline-none"
+        tabIndex={0}
       />
       
       {errorMessage && (
-        <div className="absolute inset-0 flex items-center justify-center bg-red-100 text-red-600 p-4 z-10">
+        <div className="absolute top-0 left-0 right-0 p-4 bg-red-100 text-red-800 rounded-md">
           {errorMessage}
         </div>
       )}
       
-      {!stlFile && !errorMessage && (
-        <div className="absolute inset-0 flex items-center justify-center text-gray-500 z-10">
-          Load an STL file to view the 3D model
-        </div>
-      )}
-      
-      <div className="absolute top-2 right-2 flex flex-col gap-2 z-20">
-        <button 
-          onClick={toggleSlicePlanes}
-          className={`px-2 py-1 text-xs rounded shadow ${showSlicePlanes ? 'bg-blue-500 text-white' : 'bg-white/75 text-gray-700'}`}
-        >
-          {showSlicePlanes ? 'Hide Slices' : 'Show Slices'}
-        </button>
-        {showSlicePlanes && (
-          <button 
-            onClick={toggleAllSlices}
-            className={`px-2 py-1 text-xs rounded shadow ${showAllSlices ? 'bg-green-500 text-white' : 'bg-white/75 text-gray-700'}`}
-          >
-            {showAllSlices ? 'Show Range Only' : 'Show All Slices'}
-          </button>
-        )}
+      <div className="absolute bottom-2 right-2 flex space-x-2">
         <button 
           onClick={toggleGrid}
-          className={`px-2 py-1 text-xs rounded shadow ${showGrid ? 'bg-blue-500 text-white' : 'bg-white/75 text-gray-700'}`}
+          className="px-2 py-1 bg-white border rounded-md text-sm shadow-sm"
         >
           {showGrid ? 'Hide Grid' : 'Show Grid'}
         </button>
+        
+        <button 
+          onClick={toggleSlicePlanes}
+          className="px-2 py-1 bg-white border rounded-md text-sm shadow-sm"
+        >
+          {showSlicePlanes ? 'Hide Slices' : 'Show Slices'}
+        </button>
+        
+        {layers.length > 0 && (
+          <button 
+            onClick={toggleAllSlices}
+            className="px-2 py-1 bg-white border rounded-md text-sm shadow-sm"
+          >
+            {showAllSlices ? 'Show Active Slice Only' : 'Show All Slices'}
+          </button>
+        )}
       </div>
       
       {/* Layer information display */}
@@ -467,10 +518,6 @@ export default function StlViewer3D({
           {layers[activeLayerIndex] && ` — Height: ${layers[activeLayerIndex].z.toFixed(2)}mm`}
         </div>
       )}
-      
-      <div className="absolute bottom-2 right-2 bg-white/75 px-2 py-1 text-xs rounded shadow z-20">
-        Drag to rotate | Scroll to zoom | Shift+drag to pan
-      </div>
     </div>
   );
 }
