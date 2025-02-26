@@ -2,6 +2,14 @@
 
 A web application that loads STL files, slices them into layers, and exports the layers as SVG files for cutting on a laser cutter. The app features both 3D and 2D visualization of the model and its slices.
 
+## Screenshots
+
+<img width="1915" alt="Image" src="https://github.com/user-attachments/assets/f36d1255-7368-42c4-8e4d-93ab2c61e459" />
+
+---
+
+<img width="1910" alt="Image" src="https://github.com/user-attachments/assets/c382f6b7-e64a-457a-a7e0-ebc32d5348e7" />
+
 ## Features
 
 - **File Import**: Load STL files from your local system
