@@ -20,11 +20,27 @@ const StlViewer3D = dynamic(
   }
 );
 
+// Convert File to base64
+const fileToBase64 = (file: File): Promise<string> =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+
+// Convert base64 to File
+const base64ToFile = async (base64: string, filename: string, mimeType: string): Promise<File> => {
+  const res = await fetch(base64);
+  const blob = await res.blob();
+  return new File([blob], filename, { type: mimeType });
+};
+
 export default function StlSlicer() {
   const [file, setFile] = useState<File | null>(null);
   const [dimensions, setDimensions] = useState<{ width: number; height: number; depth: number } | null>(null);
-  const [axis, setAxis] = useState<Axis>('z');
-  const [layerThickness, setLayerThickness] = useState<number>(1);
+  const [axis, setAxis] = useState<Axis>('y');
+  const [layerThickness, setLayerThickness] = useState<number>(3);
   const [isSlicing, setIsSlicing] = useState<boolean>(false);
   const [layers, setLayers] = useState<LayerData[]>([]);
   const [previewLayerIndex, setPreviewLayerIndex] = useState<number>(0);
@@ -33,6 +49,7 @@ export default function StlSlicer() {
   const [viewMode, setViewMode] = useState<'2d' | '3d'>('3d');
   const [zoomLevel, setZoomLevel] = useState<number>(0.7); // Initial zoom level reduced to 70% for better visibility
   const [hasAutoFit, setHasAutoFit] = useState<boolean>(false); // Track if we've auto-fit already
+  const previewLayerRestored = useRef(false);
   
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const slicerRef = useRef<StlSlicerUtil | null>(null);
@@ -44,6 +61,64 @@ export default function StlSlicer() {
     slicerRef.current = new StlSlicerUtil();
   }, []);
   
+  // Restore last STL file from localStorage if available
+  useEffect(() => {
+    (async () => {
+      if (file) return; // Don't overwrite if already loaded
+      const saved = localStorage.getItem('lastStlFile');
+      if (saved) {
+        try {
+          const { name, type, base64 } = JSON.parse(saved);
+          const restoredFile = await base64ToFile(base64, name, type);
+          setFile(restoredFile);
+          setError(null);
+
+          if (!slicerRef.current) {
+            slicerRef.current = new StlSlicerUtil();
+          }
+          await slicerRef.current.loadSTL(restoredFile);
+          const dims = slicerRef.current.getDimensions();
+          if (dims) setDimensions(dims);
+        } catch (err) {
+          setError('Failed to restore previous session.');
+          console.error(err);
+        }
+      }
+    })();
+    // eslint-disable-next-line
+  }, []);
+  
+  // Restore other settings from localStorage on mount
+  useEffect(() => {
+    const savedAxis = localStorage.getItem('slicerAxis');
+    if (savedAxis) setAxis(savedAxis as Axis);
+    const savedThickness = localStorage.getItem('slicerLayerThickness');
+    if (savedThickness) setLayerThickness(Number(savedThickness));
+    const savedViewMode = localStorage.getItem('slicerViewMode');
+    if (savedViewMode) setViewMode(savedViewMode as '2d' | '3d');
+    const savedZoom = localStorage.getItem('slicerZoomLevel');
+    if (savedZoom) setZoomLevel(Number(savedZoom));
+    const savedPreviewLayer = localStorage.getItem('slicerPreviewLayerIndex');
+    if (savedPreviewLayer && !previewLayerRestored.current) {
+      setPreviewLayerIndex(Number(savedPreviewLayer));
+      previewLayerRestored.current = true;
+    }
+  }, []);
+  
+  // Persist settings to localStorage when they change
+  useEffect(() => {
+    localStorage.setItem('slicerAxis', axis);
+  }, [axis]);
+  useEffect(() => {
+    localStorage.setItem('slicerLayerThickness', String(layerThickness));
+  }, [layerThickness]);
+  useEffect(() => {
+    localStorage.setItem('slicerViewMode', viewMode);
+  }, [viewMode]);
+  useEffect(() => {
+    localStorage.setItem('slicerZoomLevel', String(zoomLevel));
+  }, [zoomLevel]);
+  
   // Handle file selection
   const handleFileChange = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
     if (!isClientSide) return;
@@ -53,6 +128,18 @@ export default function StlSlicer() {
     
     setFile(selectedFile);
     setError(null);
+
+    // Save to localStorage
+    try {
+      const base64 = await fileToBase64(selectedFile);
+      localStorage.setItem('lastStlFile', JSON.stringify({
+        name: selectedFile.name,
+        type: selectedFile.type,
+        base64,
+      }));
+    } catch (err) {
+      console.error('Failed to save STL file to localStorage', err);
+    }
     
     try {
       if (!slicerRef.current) {
@@ -70,28 +157,43 @@ export default function StlSlicer() {
     }
   }, [isClientSide]);
   
-  // Update axis and trigger new slicing when changed
-  const handleAxisChange = useCallback((newAxis: Axis) => {
-    setAxis(newAxis);
-    setHasAutoFit(false); // Reset auto-fit flag when changing axis
-    
-    // Automatically re-slice when axis changes if we have a loaded file
-    if (slicerRef.current && file) {
+  // Helper to find the middle-most non-empty layer index
+  function getMiddleNonEmptyLayerIndex(layers: LayerData[]): number {
+    const nonEmpty = layers
+      .map((layer, idx) => ({ idx, count: layer.paths.length }))
+      .filter(l => l.count > 0);
+    if (nonEmpty.length === 0) return 0;
+    return nonEmpty[Math.floor(nonEmpty.length / 2)].idx;
+  }
+  
+  // Auto-slice on file load, axis, or thickness change
+  useEffect(() => {
+    if (!isClientSide || !slicerRef.current || !file) return;
+    let cancelled = false;
+    const doSlice = async () => {
       setIsSlicing(true);
-      setTimeout(async () => {
-        try {
-          const slicedLayers = slicerRef.current!.sliceModel(newAxis, layerThickness);
-          setLayers(slicedLayers);
-          setPreviewLayerIndex(Math.floor(slicedLayers.length / 2)); // Preview middle layer
-        } catch (err) {
-          setError('Failed to slice the model with the new axis. Please try again.');
+      setError(null);
+      setHasAutoFit(false);
+      try {
+        const slicedLayers = slicerRef.current!.sliceModel(axis, layerThickness);
+        if (cancelled) return;
+        setLayers(slicedLayers);
+        const midIdx = getMiddleNonEmptyLayerIndex(slicedLayers);
+        setPreviewLayerIndex(midIdx);
+        localStorage.setItem('slicerPreviewLayerIndex', String(midIdx));
+
+      } catch (err) {
+        if (!cancelled) {
+          setError('Failed to slice the model. Please try with different parameters.');
           console.error(err);
-        } finally {
-          setIsSlicing(false);
         }
-      }, 50);
-    }
-  }, [file, layerThickness]);
+      } finally {
+        if (!cancelled) setIsSlicing(false);
+      }
+    };
+    doSlice();
+    return () => { cancelled = true; };
+  }, [file, axis, layerThickness, isClientSide]);
   
   // Handle layer thickness change
   const handleLayerThicknessChange = useCallback((newThickness: number) => {
@@ -172,39 +274,6 @@ export default function StlSlicer() {
     // Apply the calculated optimal zoom
     setZoomLevel(optimalZoom);
   }, [layers, previewLayerIndex]);
-  
-  // Perform slicing operation
-  const handleSlice = useCallback(async () => {
-    if (!isClientSide) return;
-    if (!slicerRef.current || !file) {
-      setError('No STL file loaded');
-      return;
-    }
-    
-    setIsSlicing(true);
-    setError(null);
-    setHasAutoFit(false); // Reset auto-fit flag when slicing
-    
-    try {
-      const slicedLayers = slicerRef.current.sliceModel(axis, layerThickness);
-      setLayers(slicedLayers);
-      setPreviewLayerIndex(Math.floor(slicedLayers.length / 2)); // Preview middle layer
-      
-      // Auto-fit the view when layers are first loaded
-      // Using setTimeout to ensure the layers and canvas are ready
-      setTimeout(() => {
-        if (canvasRef.current && slicedLayers.length > 0) {
-          // Set a reasonable initial zoom instead of calculating it
-          setZoomLevel(0.7);
-        }
-      }, 100);
-    } catch (err) {
-      setError('Failed to slice the model. Please try with different parameters.');
-      console.error(err);
-    } finally {
-      setIsSlicing(false);
-    }
-  }, [axis, layerThickness, file, isClientSide]);
   
   // Export sliced layers as SVG files in a ZIP archive
   const handleExport = useCallback(async () => {
@@ -413,6 +482,31 @@ export default function StlSlicer() {
     }
   }, [layers, previewLayerIndex, isClientSide, zoomLevel]);
   
+  // Add a function to clear the session
+  const handleClearSession = useCallback(() => {
+    localStorage.removeItem('lastStlFile');
+    localStorage.removeItem('slicerAxis');
+    localStorage.removeItem('slicerLayerThickness');
+    localStorage.removeItem('slicerViewMode');
+    localStorage.removeItem('slicerZoomLevel');
+    localStorage.removeItem('slicerPreviewLayerIndex');
+    setFile(null);
+    setDimensions(null);
+    setLayers([]);
+    setPreviewLayerIndex(0);
+    setError(null);
+  }, []);
+  
+  // Remove handleSlice (no longer needed)
+  
+  // Remove handleAxisChange logic for manual slicing
+  const handleAxisChange = useCallback((newAxis: Axis) => {
+    setAxis(newAxis);
+    setHasAutoFit(false);
+    // Auto-fit zoom on axis change
+    setZoomLevel(0.7);
+  }, []);
+  
   // If we're not on the client side yet, return an empty div to avoid hydration mismatches
   if (!isClientSide) {
     return <div className="loading-container h-[500px] flex items-center justify-center">
@@ -432,7 +526,6 @@ export default function StlSlicer() {
         onFileChange={handleFileChange}
         onAxisChange={handleAxisChange}
         onLayerThicknessChange={handleLayerThicknessChange}
-        onSlice={handleSlice}
         onExport={handleExport}
         onViewModeChange={setViewMode}
         viewMode={viewMode}
@@ -440,6 +533,18 @@ export default function StlSlicer() {
       
       {/* Main Content */}
       <div className="flex-1 flex flex-col overflow-hidden p-6">
+        {/* Clear Session Button */}
+        <div className="mb-4 flex justify-end">
+          <Button
+            onClick={handleClearSession}
+            variant="destructive"
+            size="sm"
+            title="Clear session and remove last STL file from storage"
+          >
+            Clear Session
+          </Button>
+        </div>
+        
         {/* Error Display */}
         {error && (
           <div className="w-full p-4 bg-red-50 text-red-700 rounded-md mb-6">

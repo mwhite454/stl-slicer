@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
+import { categorizePaths, textToSvgPath } from './pathHelpers'
 
 export type Axis = 'x' | 'y' | 'z';
 export type LayerData = {
@@ -673,6 +674,8 @@ export class StlSlicer {
 
     const width = Math.ceil(Math.max(size.x, size.y));
     const height = Math.ceil(Math.max(size.x, size.y));
+    const categories = categorizePaths(layer.paths);
+    const textPath = textToSvgPath(layer.z.toString());
 
     // Check if we have any valid paths
     if (layer.paths.length === 0) {
@@ -682,6 +685,7 @@ export class StlSlicer {
 <svg width="${width}mm" height="${height}mm" viewBox="0 0 ${width} ${height}" 
      xmlns="http://www.w3.org/2000/svg">
 <g transform="translate(${width/2}, ${height/2})">
+      
   <text x="0" y="0" text-anchor="middle" font-size="3" fill="red">
     No slice data at this layer (${layer.z.toFixed(2)}mm)
   </text>
@@ -693,35 +697,38 @@ export class StlSlicer {
     let svg = `<?xml version="1.0" encoding="UTF-8" standalone="no"?>
 <svg width="${width}mm" height="${height}mm" viewBox="0 0 ${width} ${height}" 
      xmlns="http://www.w3.org/2000/svg">
-<g transform="translate(${width/2}, ${height/2})">`;
+<g transform="translate(${width/2}, ${height/2})">
+        ${textPath}`;
 
     // Add each path as a polyline
     let pathCount = 0;
-    for (const path of layer.paths) {
+    const {paths} = layer
+    
+    paths.forEach((path, index) => {
+      const pathColor = categories[index] === "external" ? "red" : "black"
+      const pathWeight = categories[index] === "external" ? "0.3" : "0.1"
       // Skip paths with less than 3 points (they can't form proper polygons)
-      if (path.length < 3) continue;
-      
+      if (path.length >= 3) {
       // No need to check if closed - we already ensured this in buildPaths
-      const pathData = path.map((point, index) => 
-        `${index === 0 ? 'M' : 'L'}${point.x.toFixed(3)},${point.y.toFixed(3)}`
-      ).join(' ') + 'Z';
+      const pathData = path.map((point:any, index:any) => `${index === 0 ? 'M' : 'L'}${point.x.toFixed(3)},${point.y.toFixed(3)}`)
+                            .join(' ') + 'Z';
 
-      svg += `
-  <path d="${pathData}" fill="none" stroke="black" stroke-width="0.1" />`;
+      svg += `\n<path d="${pathData}" fill="none" stroke="${pathColor}" stroke-width="${pathWeight}" />\n`;
       pathCount++;
-    }
+      }
+    })
 
     if (pathCount === 0) {
       svg += `
-  <text x="0" y="0" text-anchor="middle" font-size="3" fill="red">
-    All paths were invalid for this layer
-  </text>`;
+        <text x="0" y="0" text-anchor="middle" font-size="3" fill="red">
+          All paths were invalid for this layer
+        </text>`;
     }
 
     // SVG footer
     svg += `
-</g>
-</svg>`;
+    </g>
+    </svg>`;
 
     return svg;
   }

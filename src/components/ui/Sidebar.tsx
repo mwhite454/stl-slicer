@@ -15,7 +15,6 @@ interface SidebarProps {
   onFileChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onAxisChange: (axis: Axis) => void;
   onLayerThicknessChange: (thickness: number) => void;
-  onSlice: () => void;
   onExport: () => void;
   onViewModeChange: (mode: '2d' | '3d') => void;
   viewMode: '2d' | '3d';
@@ -30,7 +29,6 @@ export function Sidebar({
   onFileChange,
   onAxisChange,
   onLayerThicknessChange,
-  onSlice,
   onExport,
   onViewModeChange,
   viewMode,
@@ -127,15 +125,6 @@ export function Sidebar({
           
           {/* Action Buttons */}
           <div className="space-y-3">
-            <Button
-              onClick={onSlice}
-              disabled={!file || isSlicing}
-              className="w-full"
-              variant="default"
-            >
-              {isSlicing ? 'Slicing...' : 'Slice Model'}
-            </Button>
-            
             <Button
               onClick={onExport}
               disabled={!file}
