@@ -7,6 +7,9 @@ import * as THREE from 'three';
 import dynamic from 'next/dynamic';
 import { Sidebar } from './ui/Sidebar';
 import { Button } from './ui/button';
+import {  useSVGStore } from '@/stores/svgStore';
+import { useViewerStore } from '@/stores/viewerStore';   
+ import { useSTLStore } from '@/stores/stlStore';
 
 // Improved dynamic import to avoid chunk loading errors
 const StlViewer3D = dynamic(
@@ -37,9 +40,9 @@ const base64ToFile = async (base64: string, filename: string, mimeType: string):
 };
 
 export default function StlSlicer() {
-  const [file, setFile] = useState<File | null>(null);
+  const { file, axis, setAxis, getAxis, getFile, setFile } = useSTLStore();
   const [dimensions, setDimensions] = useState<{ width: number; height: number; depth: number } | null>(null);
-  const [axis, setAxis] = useState<Axis>('y');
+  const [modelRotation, setModelRotation] = useState<THREE.Euler>(new THREE.Euler(0, 0, 0));
   const [layerThickness, setLayerThickness] = useState<number>(3);
   const [isSlicing, setIsSlicing] = useState<boolean>(false);
   const [layers, setLayers] = useState<LayerData[]>([]);
@@ -61,32 +64,32 @@ export default function StlSlicer() {
     slicerRef.current = new StlSlicerUtil();
   }, []);
   
-  // Restore last STL file from localStorage if available
-  useEffect(() => {
-    (async () => {
-      if (file) return; // Don't overwrite if already loaded
-      const saved = localStorage.getItem('lastStlFile');
-      if (saved) {
-        try {
-          const { name, type, base64 } = JSON.parse(saved);
-          const restoredFile = await base64ToFile(base64, name, type);
-          setFile(restoredFile);
-          setError(null);
+  // // Restore last STL file from localStorage if available
+  // useEffect(() => {
+  //   (async () => {
+  //     if (file) return; // Don't overwrite if already loaded
+  //     const saved = localStorage.getItem('lastStlFile');
+  //     if (saved) {
+  //       try {
+  //         const { name, type, base64 } = JSON.parse(saved);
+  //         const restoredFile = await base64ToFile(base64, name, type);
+  //         setFile(restoredFile);
+  //         setError(null);
 
-          if (!slicerRef.current) {
-            slicerRef.current = new StlSlicerUtil();
-          }
-          await slicerRef.current.loadSTL(restoredFile);
-          const dims = slicerRef.current.getDimensions();
-          if (dims) setDimensions(dims);
-        } catch (err) {
-          setError('Failed to restore previous session.');
-          console.error(err);
-        }
-      }
-    })();
-    // eslint-disable-next-line
-  }, []);
+  //         if (!slicerRef.current) {
+  //           slicerRef.current = new StlSlicerUtil();
+  //         }
+  //         await slicerRef.current.loadSTL(restoredFile);
+  //         const dims = slicerRef.current.getDimensions();
+  //         if (dims) setDimensions(dims);
+  //       } catch (err) {
+  //         setError('Failed to restore previous session.');
+  //         console.error(err);
+  //       }
+  //     }
+  //   })();
+  //   // eslint-disable-next-line
+  // }, []);
   
   // Restore other settings from localStorage on mount
   useEffect(() => {
@@ -289,7 +292,7 @@ export default function StlSlicer() {
         svg: slicerRef.current!.generateSVG(layer)
       }));
       
-      await exportSvgZip(svgContents, file.name.replace('.stl', ''));
+      await exportSvgZip(svgContents, file.name.replace('.stl', ''), axis);
     } catch (err) {
       setError('Failed to export layers');
       console.error(err);
@@ -521,6 +524,8 @@ export default function StlSlicer() {
         file={file}
         dimensions={dimensions}
         axis={axis}
+        modelRotation={modelRotation}
+        setModelRotation={setModelRotation}
         layerThickness={layerThickness}
         isSlicing={isSlicing}
         onFileChange={handleFileChange}

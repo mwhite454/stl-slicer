@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
 import { categorizePaths, textToSvgPath } from './pathHelpers'
+// @ts-ignore
+import {ClipperLib} from "../utils/clipper";
 
 export type Axis = 'x' | 'y' | 'z';
 export type LayerData = {
@@ -705,6 +707,18 @@ export class StlSlicer {
     const {paths} = layer
     
     paths.forEach((path, index) => {
+      const isExternal = categories[index] === "external";
+      if(isExternal){
+        //draw a perimiter path around expternal path using clipper offset function
+        const offsetPath = ClipperLib.JS.Clipper.Offset(path, 0.5, ClipperLib.JS.JoinType.jtRound, ClipperLib.JS.EndType.etClosedPolygon);
+        if (offsetPath.length > 0) {
+          const offsetPathData = offsetPath.map((point:any, index:any) => `${index === 0 ? 'M' : 'L'}${point.x.toFixed(3)},${point.y.toFixed(3)}`)
+                                          .join(' ') + 'Z';
+          svg += `\n<path d="${offsetPathData}" fill="none" id="layer-${layer.index}-perimeter" stroke="purple" stroke-width="0.3" />\n`;
+          pathCount++;
+        }
+      }
+
       const pathColor = categories[index] === "external" ? "red" : "black"
       const pathWeight = categories[index] === "external" ? "0.3" : "0.1"
       // Skip paths with less than 3 points (they can't form proper polygons)
@@ -732,4 +746,46 @@ export class StlSlicer {
 
     return svg;
   }
-} 
+
+  /**
+   * Rotate the STL model around the specified axes by the given degrees
+   */
+  rotateModel(rotation: { x?: number; y?: number; z?: number }): void {
+    if (!this.geometry) {
+      throw new Error('No model loaded');
+    }
+
+    const radians = {
+      x: (rotation.x || 0) * (Math.PI / 180),
+      y: (rotation.y || 0) * (Math.PI / 180),
+      z: (rotation.z || 0) * (Math.PI / 180),
+    };
+
+    const position = this.geometry.getAttribute('position');
+    if (!position) {
+      throw new Error('Invalid geometry: missing position attribute');
+    }
+
+    const matrix = new THREE.Matrix4();
+
+    // Apply rotations in the order: X -> Y -> Z
+    if (radians.x) {
+      matrix.makeRotationX(radians.x);
+      position.applyMatrix4(matrix);
+    }
+    if (radians.y) {
+      matrix.makeRotationY(radians.y);
+      position.applyMatrix4(matrix);
+    }
+    if (radians.z) {
+      matrix.makeRotationZ(radians.z);
+      position.applyMatrix4(matrix);
+    }
+
+    // Update the bounding box after rotation
+    this.geometry.computeBoundingBox();
+    this.boundingBox = this.geometry.boundingBox ? this.geometry.boundingBox.clone() : null;
+
+    console.log(`[StlSlicer] Model rotated by x: ${rotation.x || 0}°, y: ${rotation.y || 0}°, z: ${rotation.z || 0}°`);
+  }
+}

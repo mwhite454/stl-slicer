@@ -20,7 +20,9 @@
     "@types/file-saver": "^2.0.7",
     "@types/three": "^0.173.0",
     "class-variance-authority": "^0.7.1",
+    "clipper-lib": "^6.4.2",
     "clsx": "^2.1.1",
+    "const": "^1.0.0",
     "file-saver": "^2.0.5",
     "jszip": "^3.10.1",
     "lucide-react": "^0.476.0",
@@ -29,12 +31,15 @@
     "point-in-polygon": "^1.1.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "react-svg-pan-zoom": "^3.13.1",
+    "svg-parser": "^2.0.4",
     "svg-path-parser": "^1.1.0",
     "svgo": "^3.3.2",
     "tailwind-merge": "^3.0.2",
     "tailwindcss-animate": "^1.0.7",
     "three": "^0.173.0",
-    "xmldom": "^0.6.0"
+    "xmldom": "^0.6.0",
+    "zustand": "^5.0.5"
   },
   "devDependencies": {
     "@shadcn/ui": "^0.0.4",

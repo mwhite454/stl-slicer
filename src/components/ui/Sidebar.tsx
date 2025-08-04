@@ -12,6 +12,8 @@ interface SidebarProps {
   axis: Axis;
   layerThickness: number;
   isSlicing: boolean;
+  modelRotation: { x: number; y: number; z: number };
+  setModelRotation: (rotation: { x: number; y: number; z: number }) => void;
   onFileChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onAxisChange: (axis: Axis) => void;
   onLayerThicknessChange: (thickness: number) => void;
@@ -26,6 +28,8 @@ export function Sidebar({
   axis,
   layerThickness,
   isSlicing,
+  modelRotation,
+  setModelRotation,
   onFileChange,
   onAxisChange,
   onLayerThicknessChange,
@@ -33,7 +37,23 @@ export function Sidebar({
   onViewModeChange,
   viewMode,
 }: SidebarProps) {
+  const [xRotation, setXRotation] = React.useState(modelRotation.x);
+  const [yRotation, setYRotation] = React.useState(modelRotation.y);
+  const [zRotation, setZRotation] = React.useState(modelRotation.z);
+  const onXRotation = (value: number) => {
+    setXRotation(value);
+    setModelRotation({ x: value, y: yRotation, z: zRotation });
+  };
+  const onYRotation = (value: number) => {
+    setYRotation(value);  
+    setModelRotation({ x: xRotation, y: value, z: zRotation });
+  };
+  const onZRotation = (value: number) => {
+    setZRotation(value);
+    setModelRotation({ x: xRotation, y: yRotation, z: value });
+  };
   return (
+
     <div className="w-64 h-full border-r flex flex-col bg-background">
       <ScrollArea className="flex-1">
         <div className="p-4 space-y-6">
@@ -95,6 +115,34 @@ export function Sidebar({
                 </label>
               ))}
             </div>
+          </div>
+          {/* Rotation of model */}
+            <div className="space-y-2">
+            <div className="flex justify-between items-center">
+              <label className="text-sm font-medium">Model Rotation</label>
+            </div>
+            <Slider
+              value={[xRotation]}
+              min={0.1}
+              max={180}
+              step={0.1}
+              onValueChange={(values) => onXRotation(values[0])}
+            />
+                        <Slider
+              value={[yRotation]}
+              min={0.1}
+              max={180}
+              step={0.1}
+              onValueChange={(values) => onYRotation(values[0])}
+            />
+                        <Slider
+              value={[zRotation]}
+              min={0.1}
+              max={180}
+              step={0.1}
+              onValueChange={(values) => onZRotation(values[0])}
+            />
+
           </div>
           
           {/* Layer Thickness */}

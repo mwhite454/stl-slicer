@@ -1,8 +1,114 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import JSZip from "jszip";
+import {ClipperLib} from "../../utils/clipper";
+import { SVG } from "./SVG";
+const svgPathParser = require('svg-path-parser');
 
+function parseSvgPaths(svgArray: string[]) {
+    const paths: any[] = [];
+    svgArray.forEach(svg => {
+        const matches = svg.match(/<path[^>]*d="([^"]*)"/g); // Extract all 'd' attributes
+        if (matches) {
+            matches.forEach(match => {
+                const pathData = /d="([^"]*)"/.exec(match)[1];
+                const parsed = svgPathParser(pathData);
+                paths.push(parsed);
+            });
+        }
+    });
+    return paths;
+}
+
+type SvgPathCommand = {
+    x?: number;
+    y?: number;
+    [key: string]: any;
+};
+
+function svgPathToPolygons(parsedPaths: any[], scaleFactor = 1000) {
+    const polygons: any[] = [];
+    parsedPaths.forEach(parsedPath => {
+        const polygon: any[] = [];
+        parsedPath.forEach((command: SvgPathCommand) => {
+            if (command.x !== undefined && command.y !== undefined) {
+          polygon.push({
+              X: Math.round(command.x * scaleFactor),
+              Y: Math.round(command.y * scaleFactor),
+          });
+            }
+        });
+        if (polygon.length) polygons.push(polygon);
+    });
+    return polygons;
+}
+
+interface IntPointType {
+  X: number;
+  Y: number;
+}
+
+type Polygon = IntPointType[];
+type Polygons = Polygon[];
+
+// This function unions all polygons into one, then offsets the result by offsetDistance.
+// The result is a single perimeter polygon that overlaps all input polygons by at least offsetDistance.
+function createOffsetPath(
+  polygons: Polygons,
+  offsetDistance: number,
+  scaleFactor: number = 1000
+): Polygons {
+  if (!polygons.length) return [];
+
+  // Union all polygons into a single shape
+  const clipper = new ClipperLib.Clipper();
+  const solution: Polygons = [];
+  clipper.AddPaths(polygons, ClipperLib.PolyType.ptSubject, true);
+  clipper.Execute(
+    ClipperLib.ClipType.ctUnion,
+    solution,
+    ClipperLib.PolyFillType.pftNonZero,
+    ClipperLib.PolyFillType.pftNonZero
+  );
+
+  // Simplify the unioned shape to remove overlaps
+  const simplifiedSolution = ClipperLib.Clipper.SimplifyPolygons(solution, ClipperLib.PolyFillType.pftNonZero);
+
+  // Offset the unioned shape outward by offsetDistance
+  const offsetter = new ClipperLib.ClipperOffset();
+  offsetter.AddPaths(simplifiedSolution, ClipperLib.JoinType.jtRound, ClipperLib.EndType.etClosedPolygon);
+  const offsetSolution: Polygons = [];
+  offsetter.Execute(offsetSolution, offsetDistance * scaleFactor);
+
+  // Apply additional offset passes to ensure minimum width
+  const expandedOffsetter = new ClipperLib.ClipperOffset();
+  expandedOffsetter.AddPaths(offsetSolution, ClipperLib.JoinType.jtRound, ClipperLib.EndType.etClosedPolygon);
+  const expandedSolution: Polygons = [];
+  expandedOffsetter.Execute(expandedSolution, offsetDistance * scaleFactor * 2);
+
+  return ClipperLib.Clipper.SimplifyPolygons(expandedSolution, ClipperLib.PolyFillType.pftNonZero);
+}
+
+interface PolygonsToSvgPathPoint {
+  X: number;
+  Y: number;
+}
+
+type PolygonsToSvgPathPolygon = PolygonsToSvgPathPoint[];
+
+function polygonsToSvgPath(
+  polygons: PolygonsToSvgPathPolygon[],
+  scaleFactor: number = 1000
+): string {
+  return polygons
+    .map((polygon: PolygonsToSvgPathPolygon) => {
+      return polygon
+        .map((point: PolygonsToSvgPathPoint) => `${point.X / scaleFactor},${point.Y / scaleFactor}`)
+        .join(' L ');
+    })
+    .join(' ');
+}
 
 const SvgCombinerPage = () => {
   const [canvasWidth, setCanvasWidth] = useState<number>(482); // Default width
@@ -11,7 +117,10 @@ const SvgCombinerPage = () => {
   const [gapSize, setGapSize] = useState<number>(1); // default gap between items
   const [combinedSvgUrl, setCombinedSvgUrl] = useState<string | null>(null);
   const [combinedSvgContent, setCombinedSvgContent] = useState<string | null>(null);
-
+  const [perimeterOffset, setPerimeterOffset] = useState<number>(10); // Default perimeter offset
+  const [folderName, setFolderName] = useState<string>("combined_svgs");
+  const [previewPage, setPreviewPage] = useState<number>(0);
+  const [svgZoom, setSvgZoom] = useState<number>(1);
 
   const combineAndOptimizeSVGs = async (files: File[]) => {
     const parser = new DOMParser();
@@ -30,6 +139,7 @@ const SvgCombinerPage = () => {
     let rowHeight = 0;
   
     for (const [i, file] of files.entries()) {
+      const fileName = file.name;
       const text = await file.text();
       const svgDoc = parser.parseFromString(text, "image/svg+xml");
       let svgElement = svgDoc.documentElement;
@@ -107,17 +217,26 @@ const SvgCombinerPage = () => {
     if (!files.length) return;
 
     const svgPages = await combineAndOptimizeSVGs(files);
+    const parsedPaths = parseSvgPaths(svgPages);
+    const polygons = svgPathToPolygons(parsedPaths);
+    const offsetPolygons = createOffsetPath(polygons, perimeterOffset); // Offset by 10 units
+    const svgOffsetPath = polygonsToSvgPath(offsetPolygons);
+    svgPages.push(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${canvasWidth} ${canvasHeight}"><path d="${svgOffsetPath}" fill="none" stroke="purple" /></svg>`);
+
+    // get first file name to use as base for zip
+    const lastFile = files[files.length - 1].name.replace(/\.[^/.]+$/, ""); // Remove file extension
+    setFolderName(lastFile);
 
     // Create zip
     const zip = new JSZip();
     svgPages.forEach((svg, idx) => {
-      zip.file(`page-${idx + 1}.svg`, svg);
+      zip.file(`${lastFile}-page-${idx + 1}.svg`, svg);
     });
     const zipBlob = await zip.generateAsync({ type: "blob" });
     const zipUrl = URL.createObjectURL(zipBlob);
 
     setCombinedSvgUrl(zipUrl);
-    setCombinedSvgContent(svgPages[0] || null); // Preview only the first page
+    setCombinedSvgContent(svgPages || null); // Preview only the first page
   };
 
   return (
@@ -161,6 +280,18 @@ const SvgCombinerPage = () => {
               min={0}
             />
           </div>
+            <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Perimeter Offset
+            </label>
+            <input
+                type="number"
+              value={perimeterOffset}
+              onChange={e => setPerimeterOffset(Number(e.target.value))}
+              className="block w-full text-sm text-gray-900 border border-gray-300  bg-gray-50 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+              min={0}
+            />
+          </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Dimension Type
@@ -182,24 +313,36 @@ const SvgCombinerPage = () => {
           onChange={handleFilesUpload}
           className="block w-full max-w-md text-sm text-gray-900 border border-gray-300  cursor-pointer bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
         />
-        {combinedSvgUrl && (
+        {combinedSvgContent && (
           <>
             <div className="w-full mt-6 flex justify-center">
               <a
                 href={combinedSvgUrl}
-                download="combined_svgs.zip"
+                download={`combined_${folderName}_svgs.zip`}
                 className="px-4 py-2 text-white bg-blue-500  hover:bg-blue-600 focus:ring-2 focus:ring-blue-400 focus:outline-none"
               >
                 Download Combined SVGs (ZIP)
               </a>
             </div>
             <div className="w-full mt-8">
-              <h2 className="text-xl font-semibold mb-4">Preview (First Page)</h2>
-              <div className="border border-gray-300  p-4 bg-white shadow-lg">
-                <div
-                  className="flex justify-center overflow-auto"
-                  dangerouslySetInnerHTML={{ __html: combinedSvgContent || "" }}
-                ></div>
+              <h2 className="text-xl font-semibold mb-4"> {combinedSvgContent.map((page, index)=> {
+                return (
+                  <button
+                    key={index}
+                    onClick={() => setPreviewPage(index)}
+                    className={`px-3 py-1 mr-2 mb-2 text-sm font-medium rounded ${previewPage === index ? "bg-blue-500 text-white" : "bg-gray-200 text-gray-700 hover:bg-gray-300"}`}
+                  >
+                    {index + 1}
+                  </button>
+                );
+              })}</h2>
+              <div className="border border-gray-300  p-4 bg-white shadow-lg w-full overflow-auto">
+                <SVG
+                  svgContent={combinedSvgContent[previewPage] || ""}
+                  width={canvasWidth}
+                  height={canvasHeight}
+                  zoom={svgZoom}
+                />
               </div>
             </div>
           </>
