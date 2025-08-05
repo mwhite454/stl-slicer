@@ -289,7 +289,7 @@ export default function StlSlicer() {
         svg: slicerRef.current!.generateSVG(layer)
       }));
       
-      await exportSvgZip(svgContents, file.name.replace('.stl', ''));
+      await exportSvgZip(svgContents, `${file.name.replace('.stl', '')}_${axis}_${layerThickness}mm_layers.zip`);
     } catch (err) {
       setError('Failed to export layers');
       console.error(err);
