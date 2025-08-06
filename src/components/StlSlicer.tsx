@@ -66,30 +66,7 @@ function StlSlicerContent() {
     slicerRef.current = new StlSlicerUtil();
   }, []);
   
-  // Restore last STL file from localStorage if available (commented out for now)
-  // useEffect(() => {
-  //   (async () => {
-  //     if (file) return; // Don't overwrite if already loaded
-  //     const saved = localStorage.getItem('lastStlFile');
-  //     if (saved) {
-  //       try {
-  //         const { name, type, base64 } = JSON.parse(saved);
-  //         const restoredFile = await base64ToFile(base64, name, type);
-  //         setFile(restoredFile);
-  //         setError(null);
-  //         if (!slicerRef.current) {
-  //           slicerRef.current = new StlSlicerUtil();
-  //         }
-  //         await slicerRef.current.loadSTL(restoredFile);
-  //         const dims = slicerRef.current.getDimensions();
-  //         if (dims) setDimensions(dims);
-  //       } catch (err) {
-  //         setError('Failed to restore previous session.');
-  //         console.error(err);
-  //       }
-  //     }
-  //   })();
-  // }, []);
+
   
   // Save STL file to localStorage when it changes
   useEffect(() => {
