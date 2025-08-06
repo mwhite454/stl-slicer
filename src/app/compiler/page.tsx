@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import JSZip from "jszip";
-import { SVG } from "./SVG";
+import { ReactSVGPanZoom, Tool, Value } from "react-svg-pan-zoom";
 import { parseSvgPaths, svgPathToPolygons, createOffsetPath, polygonsToSvgPath } from "./datahelpers";
 
 
@@ -16,7 +16,22 @@ const SvgCombinerPage = () => {
   const [perimeterOffset, setPerimeterOffset] = useState<number>(10); // Default perimeter offset
   const [folderName, setFolderName] = useState<string>("combined_svgs");
   const [previewPage, setPreviewPage] = useState<number>(0);
-  const [svgZoom, setSvgZoom] = useState<number>(1);
+  const [tool, setTool] = useState<Tool>('auto');
+  const [value, setValue] = useState<Value>({
+    version: 2,
+    mode: 'idle',
+    focus: false,
+    a: 1, b: 0, c: 0, d: 1, e: 0, f: 0,
+    viewerWidth: 800,
+    viewerHeight: 600,
+    SVGWidth: 800,
+    SVGHeight: 600,
+    startX: null,
+    startY: null,
+    endX: null,
+    endY: null,
+    miniatureOpen: false
+  });
 
   const combineAndOptimizeSVGs = async (files: File[]) => {
     const parser = new DOMParser();
@@ -232,13 +247,32 @@ const SvgCombinerPage = () => {
                   </button>
                 );
               })}</h2>
-              <div className="border border-gray-300  p-4 bg-white shadow-lg w-full overflow-auto">
-                <SVG
-                  svgContent={combinedSvgContent[previewPage] || ""}
-                  width={canvasWidth}
-                  height={canvasHeight}
-                  zoom={svgZoom}
-                />
+              <div className="border border-gray-300 p-4 bg-white shadow-lg w-full" style={{ height: '600px' }}>
+                <ReactSVGPanZoom
+                  width={800}
+                  height={600}
+                  tool={tool}
+                  value={value}
+                  onChangeTool={setTool}
+                  onChangeValue={setValue}
+                  detectAutoPan={false}
+                  detectPinchGesture={true}
+                  miniatureProps={{ position: 'right', background: '#f8f9fa', width: 100, height: 80 }}
+                >
+                  <svg
+                    width={canvasWidth}
+                    height={canvasHeight}
+                    viewBox={`0 0 ${canvasWidth} ${canvasHeight}`}
+                    dangerouslySetInnerHTML={{ 
+                      __html: (() => {
+                        const svgContent = combinedSvgContent[previewPage] || "";
+                        // Extract inner content from serialized SVG
+                        const match = svgContent.match(/<svg[^>]*>([\s\S]*)<\/svg>/);
+                        return match ? match[1] : svgContent;
+                      })()
+                    }}
+                  />
+                </ReactSVGPanZoom>
               </div>
             </div>
           </>
