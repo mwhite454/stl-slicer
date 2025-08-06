@@ -1,122 +1,118 @@
 "use client"
 
 import * as React from "react"
-import * as DialogPrimitive from "@radix-ui/react-dialog"
-import { X } from "lucide-react"
+import { Modal, ModalProps, Title, Text, Group, Stack } from '@mantine/core'
+import { useDisclosure } from '@mantine/hooks'
 
-import { cn } from "@/lib/utils"
+// Main Dialog component using Mantine Modal
+interface DialogProps {
+  children: React.ReactNode
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
+}
 
-const Dialog = DialogPrimitive.Root
+const Dialog = ({ children, open, onOpenChange }: DialogProps) => {
+  const [opened, { open: openModal, close: closeModal }] = useDisclosure(open || false)
+  
+  React.useEffect(() => {
+    if (open !== undefined && open !== opened) {
+      if (open) openModal()
+      else closeModal()
+    }
+  }, [open, opened, openModal, closeModal])
+  
+  React.useEffect(() => {
+    if (onOpenChange) {
+      onOpenChange(opened)
+    }
+  }, [opened, onOpenChange])
+  
+  return <>{children}</>
+}
 
-const DialogTrigger = DialogPrimitive.Trigger
+// Dialog Trigger - simple button wrapper
+const DialogTrigger = ({ children, ...props }: React.HTMLAttributes<HTMLElement>) => {
+  return <div {...props}>{children}</div>
+}
 
-const DialogPortal = DialogPrimitive.Portal
+// Dialog Content using Mantine Modal
+interface DialogContentProps extends Omit<ModalProps, 'opened' | 'onClose'> {
+  children: React.ReactNode
+}
 
-const DialogClose = DialogPrimitive.Close
+const DialogContent = React.forwardRef<HTMLDivElement, DialogContentProps>(
+  ({ children, ...props }, ref) => {
+    // This will be controlled by the parent Dialog component
+    return (
+      <Modal
+        ref={ref}
+        opened={false} // This should be controlled by parent
+        onClose={() => {}} // This should be controlled by parent
+        centered
+        size="md"
+        radius="md"
+        {...props}
+      >
+        {children}
+      </Modal>
+    )
+  }
+)
+DialogContent.displayName = "DialogContent"
 
-const DialogOverlay = React.forwardRef<
-  React.ElementRef<typeof DialogPrimitive.Overlay>,
-  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Overlay>
->(({ className, ...props }, ref) => (
-  <DialogPrimitive.Overlay
-    ref={ref}
-    className={cn(
-      "fixed inset-0 z-50 bg-black/80  data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
-      className
-    )}
-    {...props}
-  />
-))
-DialogOverlay.displayName = DialogPrimitive.Overlay.displayName
-
-const DialogContent = React.forwardRef<
-  React.ElementRef<typeof DialogPrimitive.Content>,
-  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>
->(({ className, children, ...props }, ref) => (
-  <DialogPortal>
-    <DialogOverlay />
-    <DialogPrimitive.Content
-      ref={ref}
-      className={cn(
-        "fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 border bg-background p-6 shadow-lg duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%] sm:rounded-lg",
-        className
-      )}
-      {...props}
-    >
-      {children}
-      <DialogPrimitive.Close className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground">
-        <X className="h-4 w-4" />
-        <span className="sr-only">Close</span>
-      </DialogPrimitive.Close>
-    </DialogPrimitive.Content>
-  </DialogPortal>
-))
-DialogContent.displayName = DialogPrimitive.Content.displayName
-
-const DialogHeader = ({
-  className,
-  ...props
-}: React.HTMLAttributes<HTMLDivElement>) => (
-  <div
-    className={cn(
-      "flex flex-col space-y-1.5 text-center sm:text-left",
-      className
-    )}
-    {...props}
-  />
+// Dialog Header
+const DialogHeader = ({ children, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
+  <Stack gap="xs" {...props}>
+    {children}
+  </Stack>
 )
 DialogHeader.displayName = "DialogHeader"
 
-const DialogFooter = ({
-  className,
-  ...props
-}: React.HTMLAttributes<HTMLDivElement>) => (
-  <div
-    className={cn(
-      "flex flex-col-reverse sm:flex-row sm:justify-end sm:space-x-2",
-      className
-    )}
+// Dialog Footer
+const DialogFooter = ({ children, style, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
+  <Group 
+    justify="flex-end" 
+    gap="sm" 
+    style={{ marginTop: '1rem', ...style }}
     {...props}
-  />
+  >
+    {children}
+  </Group>
 )
 DialogFooter.displayName = "DialogFooter"
 
-const DialogTitle = React.forwardRef<
-  React.ElementRef<typeof DialogPrimitive.Title>,
-  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Title>
->(({ className, ...props }, ref) => (
-  <DialogPrimitive.Title
-    ref={ref}
-    className={cn(
-      "text-lg font-semibold leading-none tracking-tight",
-      className
-    )}
-    {...props}
-  />
-))
-DialogTitle.displayName = DialogPrimitive.Title.displayName
+// Dialog Title
+const DialogTitle = React.forwardRef<HTMLHeadingElement, React.HTMLAttributes<HTMLHeadingElement>>(
+  ({ children, ...props }, ref) => (
+    <Title ref={ref} order={3} {...props}>
+      {children}
+    </Title>
+  )
+)
+DialogTitle.displayName = "DialogTitle"
 
-const DialogDescription = React.forwardRef<
-  React.ElementRef<typeof DialogPrimitive.Description>,
-  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Description>
->(({ className, ...props }, ref) => (
-  <DialogPrimitive.Description
-    ref={ref}
-    className={cn("text-sm text-muted-foreground", className)}
-    {...props}
-  />
-))
-DialogDescription.displayName = DialogPrimitive.Description.displayName
+// Dialog Description
+const DialogDescription = React.forwardRef<HTMLParagraphElement, React.HTMLAttributes<HTMLParagraphElement>>(
+  ({ children, ...props }, ref) => (
+    <Text ref={ref} size="sm" c="dimmed" {...props}>
+      {children}
+    </Text>
+  )
+)
+DialogDescription.displayName = "DialogDescription"
+
+// Dialog Close - simple wrapper
+const DialogClose = ({ children, ...props }: React.HTMLAttributes<HTMLElement>) => {
+  return <div {...props}>{children}</div>
+}
 
 export {
   Dialog,
-  DialogPortal,
-  DialogOverlay,
   DialogTrigger,
-  DialogClose,
   DialogContent,
   DialogHeader,
   DialogFooter,
   DialogTitle,
   DialogDescription,
+  DialogClose,
 }

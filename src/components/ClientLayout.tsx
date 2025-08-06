@@ -1,6 +1,7 @@
 'use client';
 
 import dynamic from 'next/dynamic';
+import MantineProvider from './MantineProvider';
 
 // Import HydrationSuppressor with dynamic import within this client component
 const HydrationSuppressor = dynamic(() => import('./HydrationSuppressor'), {
@@ -13,8 +14,10 @@ export default function ClientLayout({
   children: React.ReactNode;
 }) {
   return (
-    <HydrationSuppressor>
-      {children}
-    </HydrationSuppressor>
+    <MantineProvider>
+      <HydrationSuppressor>
+        {children}
+      </HydrationSuppressor>
+    </MantineProvider>
   );
 } 

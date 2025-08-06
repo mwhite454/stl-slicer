@@ -471,32 +471,72 @@ export default function StlViewer3D({
   return (
     <div 
       ref={containerRef}
-      className="w-full h-full relative"
-      style={{ touchAction: 'none' }}
+      style={{ 
+        width: '100%', 
+        height: '100%', 
+        position: 'relative',
+        touchAction: 'none' 
+      }}
     >
       <canvas 
         ref={canvasRef} 
-        className="w-full h-full outline-none"
+        style={{ 
+          width: '100%', 
+          height: '100%', 
+          outline: 'none',
+          display: 'block'
+        }}
         tabIndex={0}
       />
       
       {errorMessage && (
-        <div className="absolute top-0 left-0 right-0 p-4 bg-red-100 text-red-800 rounded-md">
+        <div style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          padding: '1rem',
+          backgroundColor: '#fecaca',
+          color: '#991b1b',
+          borderRadius: '0.375rem'
+        }}>
           {errorMessage}
         </div>
       )}
       
-      <div className="absolute bottom-2 right-2 flex space-x-2">
+      <div style={{
+        position: 'absolute',
+        bottom: '0.5rem',
+        right: '0.5rem',
+        display: 'flex',
+        gap: '0.5rem'
+      }}>
         <button 
           onClick={toggleGrid}
-          className="px-2 py-1 bg-white border rounded-md text-sm shadow-sm"
+          style={{
+            padding: '0.25rem 0.5rem',
+            backgroundColor: 'white',
+            border: '1px solid #d1d5db',
+            borderRadius: '0.375rem',
+            fontSize: '0.875rem',
+            boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)',
+            cursor: 'pointer'
+          }}
         >
           {showGrid ? 'Hide Grid' : 'Show Grid'}
         </button>
         
         <button 
           onClick={toggleSlicePlanes}
-          className="px-2 py-1 bg-white border rounded-md text-sm shadow-sm"
+          style={{
+            padding: '0.25rem 0.5rem',
+            backgroundColor: 'white',
+            border: '1px solid #d1d5db',
+            borderRadius: '0.375rem',
+            fontSize: '0.875rem',
+            boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)',
+            cursor: 'pointer'
+          }}
         >
           {showSlicePlanes ? 'Hide Slices' : 'Show Slices'}
         </button>
@@ -504,7 +544,15 @@ export default function StlViewer3D({
         {layers.length > 0 && (
           <button 
             onClick={toggleAllSlices}
-            className="px-2 py-1 bg-white border rounded-md text-sm shadow-sm"
+            style={{
+              padding: '0.25rem 0.5rem',
+              backgroundColor: 'white',
+              border: '1px solid #d1d5db',
+              borderRadius: '0.375rem',
+              fontSize: '0.875rem',
+              boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)',
+              cursor: 'pointer'
+            }}
           >
             {showAllSlices ? 'Show Active Slice Only' : 'Show All Slices'}
           </button>
@@ -513,7 +561,17 @@ export default function StlViewer3D({
       
       {/* Layer information display */}
       {layers.length > 0 && showSlicePlanes && (
-        <div className="absolute top-2 left-2 bg-white/75 px-2 py-1 text-xs rounded shadow z-20">
+        <div style={{
+          position: 'absolute',
+          top: '0.5rem',
+          left: '0.5rem',
+          backgroundColor: 'rgba(255, 255, 255, 0.75)',
+          padding: '0.25rem 0.5rem',
+          fontSize: '0.75rem',
+          borderRadius: '0.25rem',
+          boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)',
+          zIndex: 20
+        }}>
           Layer: {activeLayerIndex + 1}/{layers.length} 
           {layers[activeLayerIndex] && ` — Height: ${layers[activeLayerIndex].z.toFixed(2)}mm`}
         </div>

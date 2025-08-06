@@ -4,21 +4,26 @@ import { useCallback, useEffect, useState, useRef } from 'react';
 import { StlSlicer as StlSlicerUtil, Axis, LayerData } from '../utils/StlSlicer';
 import { exportSvgZip } from '../utils/exportUtils';
 import * as THREE from 'three';
+import { Euler } from 'three'; // Added Euler import
 import dynamic from 'next/dynamic';
 import { Sidebar } from './ui/Sidebar';
 import { Button } from './ui/button';
 import {  useSVGStore } from '@/stores/svgStore';
 import { useViewerStore } from '@/stores/viewerStore';   
- import { useSTLStore } from '@/stores/stlStore';
+import { useSTLStore } from '@/stores/stlStore';
+import { Box, Flex, Text, Alert, Group, Stack, Title, ActionIcon, Loader, Slider } from '@mantine/core';
 
 // Improved dynamic import to avoid chunk loading errors
 const StlViewer3D = dynamic(
   () => import('./StlViewer3D').then(mod => mod.default), 
   {
     loading: () => (
-      <div className="w-full h-[400px] border rounded-md bg-gray-100 flex items-center justify-center">
-        <p>Loading 3D Viewer...</p>
-      </div>
+      <Box w="100%" h={400} style={{ border: '1px solid #e9ecef', borderRadius: '8px', backgroundColor: '#f8f9fa', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <Stack align="center" gap="sm">
+          <Loader size="md" />
+          <Text size="sm">Loading 3D Viewer...</Text>
+        </Stack>
+      </Box>
     ),
   }
 );
@@ -39,7 +44,7 @@ const base64ToFile = async (base64: string, filename: string, mimeType: string):
   return new File([blob], filename, { type: mimeType });
 };
 
-export default function StlSlicer() {
+function StlSlicerContent() {
   const { file, axis, setAxis, getAxis, getFile, setFile } = useSTLStore();
   const [dimensions, setDimensions] = useState<{ width: number; height: number; depth: number } | null>(null);
   const [modelRotation, setModelRotation] = useState<THREE.Euler>(new THREE.Euler(0, 0, 0));
@@ -48,7 +53,6 @@ export default function StlSlicer() {
   const [layers, setLayers] = useState<LayerData[]>([]);
   const [previewLayerIndex, setPreviewLayerIndex] = useState<number>(0);
   const [error, setError] = useState<string | null>(null);
-  const [isClientSide, setIsClientSide] = useState<boolean>(false);
   const [viewMode, setViewMode] = useState<'2d' | '3d'>('3d');
   const [zoomLevel, setZoomLevel] = useState<number>(0.7); // Initial zoom level reduced to 70% for better visibility
   const [hasAutoFit, setHasAutoFit] = useState<boolean>(false); // Track if we've auto-fit already
@@ -57,14 +61,12 @@ export default function StlSlicer() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const slicerRef = useRef<StlSlicerUtil | null>(null);
   
-  // Check if we're on the client side
+  // Initialize the slicer
   useEffect(() => {
-    setIsClientSide(true);
-    // Only initialize the slicer on the client side
     slicerRef.current = new StlSlicerUtil();
   }, []);
   
-  // // Restore last STL file from localStorage if available
+  // Restore last STL file from localStorage if available (commented out for now)
   // useEffect(() => {
   //   (async () => {
   //     if (file) return; // Don't overwrite if already loaded
@@ -75,7 +77,6 @@ export default function StlSlicer() {
   //         const restoredFile = await base64ToFile(base64, name, type);
   //         setFile(restoredFile);
   //         setError(null);
-
   //         if (!slicerRef.current) {
   //           slicerRef.current = new StlSlicerUtil();
   //         }
@@ -88,8 +89,27 @@ export default function StlSlicer() {
   //       }
   //     }
   //   })();
-  //   // eslint-disable-next-line
   // }, []);
+  
+  // Save STL file to localStorage when it changes
+  useEffect(() => {
+    (async () => {
+      if (file) {
+        try {
+          const base64 = await fileToBase64(file);
+          localStorage.setItem('lastStlFile', JSON.stringify({
+            name: file.name,
+            type: file.type,
+            base64
+          }));
+        } catch (err) {
+          console.error('Failed to save STL file:', err);
+        }
+      } else {
+        localStorage.removeItem('lastStlFile');
+      }
+    })();
+  }, [file]);
   
   // Restore other settings from localStorage on mount
   useEffect(() => {
@@ -124,7 +144,6 @@ export default function StlSlicer() {
   
   // Handle file selection
   const handleFileChange = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
-    if (!isClientSide) return;
     
     const selectedFile = event.target.files?.[0];
     if (!selectedFile) return;
@@ -158,7 +177,7 @@ export default function StlSlicer() {
       setError('Failed to load STL file. Please check the file format.');
       console.error(err);
     }
-  }, [isClientSide]);
+  }, []);
   
   // Helper to find the middle-most non-empty layer index
   function getMiddleNonEmptyLayerIndex(layers: LayerData[]): number {
@@ -171,7 +190,7 @@ export default function StlSlicer() {
   
   // Auto-slice on file load, axis, or thickness change
   useEffect(() => {
-    if (!isClientSide || !slicerRef.current || !file) return;
+    if (!slicerRef.current || !file) return;
     // Check if model is actually loaded before attempting to slice
     if (!slicerRef.current.isModelLoaded()) return;
     
@@ -199,11 +218,11 @@ export default function StlSlicer() {
     };
     doSlice();
     return () => { cancelled = true; };
-  }, [file, axis, layerThickness, isClientSide]);
+  }, [file, axis, layerThickness]);
   
   // Load file into slicer if file exists but model isn't loaded
   useEffect(() => {
-    if (!isClientSide || !file || !slicerRef.current) return;
+    if (!file || !slicerRef.current) return;
     if (slicerRef.current.isModelLoaded()) return; // Already loaded
     
     const loadFile = async () => {
@@ -222,7 +241,7 @@ export default function StlSlicer() {
     };
     
     loadFile();
-  }, [file, isClientSide]);
+  }, [file]);
   
   // Handle layer thickness change
   const handleLayerThicknessChange = useCallback((newThickness: number) => {
@@ -306,7 +325,6 @@ export default function StlSlicer() {
   
   // Export sliced layers as SVG files in a ZIP archive
   const handleExport = useCallback(async () => {
-    if (!isClientSide) return;
     if (!slicerRef.current || !file || layers.length === 0) {
       setError('No sliced layers to export');
       return;
@@ -323,7 +341,7 @@ export default function StlSlicer() {
       setError('Failed to export layers');
       console.error(err);
     }
-  }, [file, layers, isClientSide]);
+  }, [file, layers]);
   
   // Add a new effect to ensure canvas size matches container
   useEffect(() => {
@@ -369,7 +387,7 @@ export default function StlSlicer() {
   
   // Completely revised drawing function with a simpler approach
   useEffect(() => {
-    if (!isClientSide || !canvasRef.current || !layers.length) return;
+    if (!canvasRef.current || !layers.length) return;
     
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
@@ -509,7 +527,7 @@ export default function StlSlicer() {
         10, 60
       );
     }
-  }, [layers, previewLayerIndex, isClientSide, zoomLevel]);
+  }, [layers, previewLayerIndex, zoomLevel]);
   
   // Add a function to clear the session
   const handleClearSession = useCallback(() => {
@@ -536,22 +554,19 @@ export default function StlSlicer() {
     setZoomLevel(0.7);
   }, []);
   
-  // If we're not on the client side yet, return an empty div to avoid hydration mismatches
-  if (!isClientSide) {
-    return <div className="loading-container h-[500px] flex items-center justify-center">
-      <p>Loading STL Slicer...</p>
-    </div>;
-  }
+  // Component is now client-side only via dynamic import, no need for loading state
   
   return (
-    <div className="flex h-screen overflow-hidden">
+    <Flex h="100vh" style={{ overflow: 'hidden' }}>
       {/* Sidebar */}
       <Sidebar
         file={file}
         dimensions={dimensions}
         axis={axis}
         modelRotation={modelRotation}
-        setModelRotation={setModelRotation}
+        setModelRotation={(rotation: { x: number; y: number; z: number }) => {
+          setModelRotation(new Euler(rotation.x, rotation.y, rotation.z));
+        }}
         layerThickness={layerThickness}
         isSlicing={isSlicing}
         onFileChange={handleFileChange}
@@ -563,9 +578,9 @@ export default function StlSlicer() {
       />
       
       {/* Main Content */}
-      <div className="flex-1 flex flex-col overflow-hidden p-6">
+      <Box style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: '1.5rem' }}>
         {/* Clear Session Button */}
-        <div className="mb-4 flex justify-end">
+        <Group justify="flex-end" mb="md">
           <Button
             onClick={handleClearSession}
             variant="destructive"
@@ -574,26 +589,31 @@ export default function StlSlicer() {
           >
             Clear Session
           </Button>
-        </div>
+        </Group>
         
         {/* Error Display */}
         {error && (
-          <div className="w-full p-4 bg-red-50 text-red-700 rounded-md mb-6">
+          <Alert color="red" mb="lg">
             {error}
-          </div>
+          </Alert>
         )}
         
         {/* 3D or 2D View based on selected mode */}
-        <div className="flex-1 overflow-hidden">
+        <Box style={{ flex: 1, overflow: 'hidden' }}>
           {file && (
             <>
               {viewMode === '3d' ? (
                 <>
-                  <div className="relative w-full h-full" style={{ 
-                    zIndex: 10, 
-                    minHeight: '400px',
-                    pointerEvents: 'auto'
-                  }}>
+                  <Box 
+                    style={{ 
+                      position: 'relative', 
+                      width: '100%', 
+                      height: '100%',
+                      zIndex: 10, 
+                      minHeight: '400px',
+                      pointerEvents: 'auto'
+                    }}
+                  >
                     <StlViewer3D
                       stlFile={file}
                       layers={layers}
@@ -603,27 +623,39 @@ export default function StlSlicer() {
                     />
                     
                     {/* Move the instructions to the top right corner */}
-                    <div 
-                      className="absolute top-2 right-2 p-2 bg-blue-50 rounded-md text-sm shadow-md border border-blue-100 max-w-[250px]"
-                      style={{ opacity: 0.85, zIndex: 20 }}
+                    <Box 
+                      style={{ 
+                        position: 'absolute',
+                        top: '0.5rem',
+                        right: '0.5rem',
+                        padding: '0.5rem',
+                        backgroundColor: '#e7f5ff',
+                        borderRadius: '0.375rem',
+                        fontSize: '0.875rem',
+                        boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1)',
+                        border: '1px solid #74c0fc',
+                        maxWidth: '250px',
+                        opacity: 0.85,
+                        zIndex: 20
+                      }}
                     >
-                      <p className="font-medium text-xs">3D Controls:</p>
-                      <ul className="list-disc pl-4 text-xs text-gray-700 mt-1">
+                      <Text size="xs" fw={500}>3D Controls:</Text>
+                      <Box component="ul" style={{ listStyleType: 'disc', paddingLeft: '1rem', marginTop: '0.25rem' }}>
                         <li>Drag to rotate</li>
                         <li>Scroll to zoom</li>
                         <li>Shift+drag to pan</li>
-                      </ul>
-                    </div>
-                  </div>
+                      </Box>
+                    </Box>
+                  </Box>
                 </>
               ) : (
                 layers.length > 0 && (
-                  <div className="w-full h-full flex flex-col">
-                    <div className="flex justify-between items-center mb-2">
-                      <h3 className="font-medium">
+                  <Box style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
+                    <Group justify="space-between" align="center" mb="sm">
+                      <Text fw={500}>
                         2D Layer Preview: {previewLayerIndex + 1} / {layers.length}
-                      </h3>
-                      <div className="flex items-center space-x-2">
+                      </Text>
+                      <Group gap="xs">
                         <Button
                           onClick={() => handleZoomChange('out')}
                           variant="outline"
@@ -656,31 +688,41 @@ export default function StlSlicer() {
                         >
                           <span className="text-lg">+</span>
                         </Button>
-                        <span className="ml-2 text-xs text-gray-600">
+                        <Text size="xs" c="dimmed" ml="sm">
                           {Math.round(zoomLevel * 100)}%
-                        </span>
-                      </div>
-                    </div>
-                    <div className="flex-1 relative overflow-hidden" style={{ minHeight: "400px" }}>
+                        </Text>
+                      </Group>
+                    </Group>
+                    <Box style={{ flex: 1, position: 'relative', overflow: 'hidden', minHeight: '400px', width: '100%', height: '100%' }}>
                       <canvas
                         ref={canvasRef}
-                        className="w-full h-full border rounded-md bg-white"
+                        style={{ 
+                          width: '100%', 
+                          height: '100%', 
+                          border: '1px solid #dee2e6', 
+                          borderRadius: '0.375rem', 
+                          backgroundColor: 'white',
+                          display: 'block',
+                          position: 'absolute',
+                          top: 0,
+                          left: 0
+                        }}
                       />
-                    </div>
-                  </div>
+                    </Box>
+                  </Box>
                 )
               )}
             </>
           )}
-        </div>
+        </Box>
         
         {/* Layer Navigation - Positioned below the canvas */}
         {layers.length > 0 && (
-          <div className="mt-4 pt-4 border-t">
-            <h3 className="font-medium mb-2">
+          <Box mt="md" pt="md" style={{ borderTop: '1px solid #dee2e6' }}>
+            <Text fw={500} mb="sm">
               Navigate Layers: {previewLayerIndex + 1} / {layers.length}
-            </h3>
-            <div className="flex gap-4 items-center mb-4">
+            </Text>
+            <Group gap="md" align="center" mb="md">
               <Button
                 onClick={() => setPreviewLayerIndex(Math.max(0, previewLayerIndex - 1))}
                 disabled={previewLayerIndex === 0}
@@ -690,13 +732,12 @@ export default function StlSlicer() {
                 Previous
               </Button>
               
-              <input
-                type="range"
-                min="0"
+              <Slider
+                min={0}
                 max={layers.length - 1}
                 value={previewLayerIndex}
-                onChange={(e) => setPreviewLayerIndex(parseInt(e.target.value))}
-                className="w-full"
+                onChange={setPreviewLayerIndex}
+                style={{ flex: 1 }}
               />
               
               <Button
@@ -707,10 +748,28 @@ export default function StlSlicer() {
               >
                 Next
               </Button>
-            </div>
-          </div>
+            </Group>
+          </Box>
         )}
-      </div>
-    </div>
+      </Box>
+    </Flex>
   );
-} 
+}
+
+// Dynamic import wrapper to prevent hydration errors
+const StlSlicer = dynamic(
+  () => Promise.resolve(StlSlicerContent),
+  {
+    ssr: false,
+    loading: () => (
+      <Box h="100vh" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <Stack align="center" gap="sm">
+          <Loader size="lg" />
+          <Text>Loading STL Slicer...</Text>
+        </Stack>
+      </Box>
+    ),
+  }
+);
+
+export default StlSlicer;
