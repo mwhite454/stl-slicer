@@ -22,6 +22,16 @@ export class StlSlicer {
    * Load an STL file and prepare it for slicing
    */
   async loadSTL(file: File): Promise<void> {
+    // Validate that the file parameter is a proper File/Blob object
+    if (!file) {
+      throw new Error('No file provided');
+    }
+    
+    // Check if it has the necessary properties of a File/Blob
+    if (typeof file !== 'object' || !('size' in file) || !('type' in file)) {
+      throw new Error('Invalid file parameter: must be a File or Blob object');
+    }
+    
     return new Promise((resolve, reject) => {
       const loader = new STLLoader();
       const reader = new FileReader();
@@ -74,6 +84,13 @@ export class StlSlicer {
       };
       reader.readAsArrayBuffer(file);
     });
+  }
+
+  /**
+   * Check if a model is loaded and ready for operations
+   */
+  isModelLoaded(): boolean {
+    return this.geometry !== null && this.boundingBox !== null;
   }
 
   /**

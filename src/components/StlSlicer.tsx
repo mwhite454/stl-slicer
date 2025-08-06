@@ -172,6 +172,9 @@ export default function StlSlicer() {
   // Auto-slice on file load, axis, or thickness change
   useEffect(() => {
     if (!isClientSide || !slicerRef.current || !file) return;
+    // Check if model is actually loaded before attempting to slice
+    if (!slicerRef.current.isModelLoaded()) return;
+    
     let cancelled = false;
     const doSlice = async () => {
       setIsSlicing(true);
@@ -197,6 +200,29 @@ export default function StlSlicer() {
     doSlice();
     return () => { cancelled = true; };
   }, [file, axis, layerThickness, isClientSide]);
+  
+  // Load file into slicer if file exists but model isn't loaded
+  useEffect(() => {
+    if (!isClientSide || !file || !slicerRef.current) return;
+    if (slicerRef.current.isModelLoaded()) return; // Already loaded
+    
+    const loadFile = async () => {
+      try {
+        await slicerRef.current!.loadSTL(file);
+        const dims = slicerRef.current!.getDimensions();
+        if (dims) {
+          setDimensions(dims);
+        }
+        setError(null);
+      } catch (err) {
+        const errorMessage = err instanceof Error ? err.message : 'Failed to load STL file. Please check the file format.';
+        setError(errorMessage);
+        console.error('File loading error:', err);
+      }
+    };
+    
+    loadFile();
+  }, [file, isClientSide]);
   
   // Handle layer thickness change
   const handleLayerThicknessChange = useCallback((newThickness: number) => {
