@@ -1,57 +1,74 @@
 import * as React from "react"
-import { Slot } from "@radix-ui/react-slot"
-import { cva, type VariantProps } from "class-variance-authority"
+import { Button as MantineButton, ButtonProps as MantineButtonProps } from '@mantine/core'
 
-import { cn } from "@/lib/utils"
+// Map shadcn/ui variants to Mantine variants
+type ButtonVariant = 'default' | 'destructive' | 'outline' | 'secondary' | 'ghost' | 'link'
+type ButtonSize = 'default' | 'sm' | 'lg' | 'icon'
 
-const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
-  {
-    variants: {
-      variant: {
-        default:
-          "bg-primary text-primary-foreground shadow hover:bg-primary/90",
-        destructive:
-          "bg-destructive text-destructive-foreground shadow-sm hover:bg-destructive/90",
-        outline:
-          "border border-input bg-background shadow-sm hover:bg-accent hover:text-accent-foreground",
-        secondary:
-          "bg-secondary text-secondary-foreground shadow-sm hover:bg-secondary/80",
-        ghost: "hover:bg-accent hover:text-accent-foreground",
-        link: "text-primary underline-offset-4 hover:underline",
-      },
-      size: {
-        default: "h-9 px-4 py-2",
-        sm: "h-8 rounded-md px-3 text-xs",
-        lg: "h-10 rounded-md px-8",
-        icon: "h-9 w-9",
-      },
-    },
-    defaultVariants: {
-      variant: "default",
-      size: "default",
-    },
-  }
-)
-
-export interface ButtonProps
-  extends React.ButtonHTMLAttributes<HTMLButtonElement>,
-    VariantProps<typeof buttonVariants> {
+export interface ButtonProps extends Omit<MantineButtonProps, 'variant' | 'size'> {
+  variant?: ButtonVariant
+  size?: ButtonSize
   asChild?: boolean
+  onClick?: React.MouseEventHandler<HTMLButtonElement>
+  title?: string
 }
 
 const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
-  ({ className, variant, size, asChild = false, ...props }, ref) => {
-    const Comp = asChild ? Slot : "button"
+  ({ variant = 'default', size = 'default', asChild = false, children, ...props }, ref) => {
+    // Map shadcn variants to Mantine variants
+    const getMantineVariant = (variant: ButtonVariant): MantineButtonProps['variant'] => {
+      switch (variant) {
+        case 'default': return 'filled'
+        case 'destructive': return 'filled'
+        case 'outline': return 'outline'
+        case 'secondary': return 'light'
+        case 'ghost': return 'subtle'
+        case 'link': return 'transparent'
+        default: return 'filled'
+      }
+    }
+
+    // Map shadcn sizes to Mantine sizes
+    const getMantineSize = (size: ButtonSize): MantineButtonProps['size'] => {
+      switch (size) {
+        case 'sm': return 'xs'
+        case 'default': return 'sm'
+        case 'lg': return 'md'
+        case 'icon': return 'sm'
+        default: return 'sm'
+      }
+    }
+
+    const mantineVariant = getMantineVariant(variant)
+    const mantineSize = getMantineSize(size)
+    
+    // Handle destructive variant with red color
+    const color = variant === 'destructive' ? 'red' : undefined
+    
+    // Handle icon size with square styling
+    const style = size === 'icon' ? { width: '36px', height: '36px', padding: 0 } : undefined
+
+    if (asChild) {
+      // For asChild behavior, we'll just render the children directly
+      // This is a simplified approach since Mantine doesn't have Slot equivalent
+      return <>{children}</>
+    }
+
     return (
-      <Comp
-        className={cn(buttonVariants({ variant, size, className }))}
+      <MantineButton
         ref={ref}
+        variant={mantineVariant}
+        size={mantineSize}
+        color={color}
+        style={style}
         {...props}
-      />
+      >
+        {children}
+      </MantineButton>
     )
   }
 )
+
 Button.displayName = "Button"
 
-export { Button, buttonVariants }
+export { Button }

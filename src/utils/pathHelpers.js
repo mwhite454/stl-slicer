@@ -1,6 +1,6 @@
 import opentype from "opentype.js";
 
-export async function textToSvgPath(text, fontUrl="fonts/SpaceMono-Regular.ttf", fontSize = 3, x = 0, y = 0) {
+export async function textToSvgPath(text, fontUrl="fonts/SpaceMono-Regular.ttf", fontSize = 12, x = 0, y = 0) {
   try {
     // Load the font asynchronously
     const font = await opentype.load(fontUrl);

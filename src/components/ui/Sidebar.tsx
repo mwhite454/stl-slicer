@@ -2,9 +2,20 @@ import React from 'react';
 import { Axis } from '../../utils/StlSlicer';
 import { Button } from './button';
 import { Card } from './card';
-import { Separator } from './separator';
-import { ScrollArea } from './scroll-area';
 import { Slider } from './slider';
+import { 
+  Box, 
+  Stack, 
+  Title, 
+  Text, 
+  FileInput, 
+  Radio, 
+  Group, 
+  NumberInput,
+  Divider,
+  ScrollArea,
+  Grid
+} from '@mantine/core';
 
 interface SidebarProps {
   file: File | null;
@@ -12,6 +23,8 @@ interface SidebarProps {
   axis: Axis;
   layerThickness: number;
   isSlicing: boolean;
+  modelRotation: { x: number; y: number; z: number };
+  setModelRotation: (rotation: { x: number; y: number; z: number }) => void;
   onFileChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onAxisChange: (axis: Axis) => void;
   onLayerThicknessChange: (thickness: number) => void;
@@ -26,6 +39,8 @@ export function Sidebar({
   axis,
   layerThickness,
   isSlicing,
+  modelRotation,
+  setModelRotation,
   onFileChange,
   onAxisChange,
   onLayerThicknessChange,
@@ -33,120 +48,169 @@ export function Sidebar({
   onViewModeChange,
   viewMode,
 }: SidebarProps) {
+  const [xRotation, setXRotation] = React.useState(modelRotation.x);
+  const [yRotation, setYRotation] = React.useState(modelRotation.y);
+  const [zRotation, setZRotation] = React.useState(modelRotation.z);
+  const onXRotation = (value: number) => {
+    setXRotation(value);
+    setModelRotation({ x: value, y: yRotation, z: zRotation });
+  };
+  const onYRotation = (value: number) => {
+    setYRotation(value);  
+    setModelRotation({ x: xRotation, y: value, z: zRotation });
+  };
+  const onZRotation = (value: number) => {
+    setZRotation(value);
+    setModelRotation({ x: xRotation, y: yRotation, z: value });
+  };
   return (
-    <div className="w-64 h-full border-r flex flex-col bg-background">
-      <ScrollArea className="flex-1">
-        <div className="p-4 space-y-6">
-          <div>
-            <h1 className="text-xl font-bold mb-2">STL Slicer</h1>
-            <p className="text-sm text-muted-foreground">Upload and slice STL files</p>
-          </div>
+    <Box w={256} h="100%" style={{ borderRight: '1px solid #e9ecef', display: 'flex', flexDirection: 'column' }}>
+      <ScrollArea style={{ flex: 1 }}>
+        <Stack p="md" gap="lg">
+          <Stack gap="xs">
+            <Title order={2} size="xl" fw={700}>STL Slicer</Title>
+            <Text size="sm" c="dimmed">Upload and slice STL files</Text>
+          </Stack>
           
-          <Separator />
+          <Divider />
           
           {/* File Input */}
-          <div className="space-y-2">
-            <label className="text-sm font-medium">STL File</label>
-            <input
-              type="file"
+          <Stack gap="xs">
+            <Text size="sm" fw={500}>STL File</Text>
+            <FileInput
               accept=".stl"
-              onChange={onFileChange}
-              className="block w-full text-sm file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-medium file:bg-secondary file:text-secondary-foreground hover:file:bg-secondary/80"
+              onChange={(file) => {
+                if (file) {
+                  const event = {
+                    target: { files: [file] }
+                  } as unknown as React.ChangeEvent<HTMLInputElement>;
+                  onFileChange(event);
+                }
+              }}
+              placeholder="Select STL file"
             />
-            {file && <p className="text-sm text-muted-foreground mt-1">Selected: {file.name}</p>}
-          </div>
+            {file && <Text size="sm" c="dimmed">Selected: {file.name}</Text>}
+          </Stack>
           
           {/* Dimensions Display */}
           {dimensions && (
-            <Card className="p-4">
-              <h3 className="font-medium text-sm mb-3">Model Dimensions</h3>
-              <div className="space-y-2">
-                <div className="space-y-1">
-                  <p className="text-xs text-muted-foreground">Width</p>
-                  <p className="text-sm font-medium">{dimensions.width.toFixed(2)} mm</p>
-                </div>
-                <div className="space-y-1">
-                  <p className="text-xs text-muted-foreground">Height</p>
-                  <p className="text-sm font-medium">{dimensions.height.toFixed(2)} mm</p>
-                </div>
-                <div className="space-y-1">
-                  <p className="text-xs text-muted-foreground">Depth</p>
-                  <p className="text-sm font-medium">{dimensions.depth.toFixed(2)} mm</p>
-                </div>
-              </div>
+            <Card>
+              <Title order={4} size="sm" mb="sm">Model Dimensions</Title>
+              <Stack gap="sm">
+                <Box>
+                  <Text size="xs" c="dimmed">Width</Text>
+                  <Text size="sm" fw={500}>{dimensions.width.toFixed(2)} mm</Text>
+                </Box>
+                <Box>
+                  <Text size="xs" c="dimmed">Height</Text>
+                  <Text size="sm" fw={500}>{dimensions.height.toFixed(2)} mm</Text>
+                </Box>
+                <Box>
+                  <Text size="xs" c="dimmed">Depth</Text>
+                  <Text size="sm" fw={500}>{dimensions.depth.toFixed(2)} mm</Text>
+                </Box>
+              </Stack>
             </Card>
           )}
           
           {/* Axis Selection */}
-          <div className="space-y-2">
-            <label className="text-sm font-medium">Slicing Axis</label>
-            <div className="flex gap-4">
-              {(['x', 'y', 'z'] as Axis[]).map((a) => (
-                <label key={a} className="inline-flex items-center">
-                  <input
-                    type="radio"
-                    name="axis"
-                    value={a}
-                    checked={axis === a}
-                    onChange={() => onAxisChange(a)}
-                    className="w-4 h-4 text-primary border-primary-foreground focus:ring-primary"
-                  />
-                  <span className="ml-2 text-sm uppercase">{a}</span>
-                </label>
-              ))}
-            </div>
-          </div>
+          <Stack gap="xs">
+            <Text size="sm" fw={500}>Slicing Axis</Text>
+            <Radio.Group value={axis} onChange={(value) => onAxisChange(value as Axis)}>
+              <Group>
+                {(['x', 'y', 'z'] as Axis[]).map((a) => (
+                  <Radio key={a} value={a} label={a.toUpperCase()} />
+                ))}
+              </Group>
+            </Radio.Group>
+          </Stack>
+          
+          {/* Rotation of model */}
+          <Stack gap="xs">
+            <Text size="sm" fw={500}>Model Rotation</Text>
+            <Stack gap="sm">
+              <Box>
+                <Text size="xs" c="dimmed" mb="xs">X Rotation: {xRotation.toFixed(1)}°</Text>
+                <Slider
+                  value={xRotation}
+                  min={0.1}
+                  max={180}
+                  step={0.1}
+                  onChange={(value) => onXRotation(value)}
+                />
+              </Box>
+              <Box>
+                <Text size="xs" c="dimmed" mb="xs">Y Rotation: {yRotation.toFixed(1)}°</Text>
+                <Slider
+                  value={yRotation}
+                  min={0.1}
+                  max={180}
+                  step={0.1}
+                  onChange={(value) => onYRotation(value)}
+                />
+              </Box>
+              <Box>
+                <Text size="xs" c="dimmed" mb="xs">Z Rotation: {zRotation.toFixed(1)}°</Text>
+                <Slider
+                  value={zRotation}
+                  min={0.1}
+                  max={180}
+                  step={0.1}
+                  onChange={(value) => onZRotation(value)}
+                />
+              </Box>
+            </Stack>
+          </Stack>
           
           {/* Layer Thickness */}
-          <div className="space-y-2">
-            <div className="flex justify-between items-center">
-              <label className="text-sm font-medium">Layer Thickness</label>
-              <span className="text-xs text-muted-foreground">{layerThickness.toFixed(2)} mm</span>
-            </div>
+          <Stack gap="xs">
+            <Group justify="space-between">
+              <Text size="sm" fw={500}>Layer Thickness</Text>
+              <Text size="xs" c="dimmed">{layerThickness.toFixed(2)} mm</Text>
+            </Group>
             <Slider
-              value={[layerThickness]}
+              value={layerThickness}
               min={0.1}
               max={5}
               step={0.1}
-              onValueChange={(values) => onLayerThicknessChange(values[0])}
+              onChange={(value) => onLayerThicknessChange(value)}
             />
-            <div className="flex items-center mt-2">
-              <input
-                type="number"
-                min="0.1"
-                step="0.1"
+            <Group align="center" gap="xs">
+              <NumberInput
                 value={layerThickness}
-                onChange={(e) => onLayerThicknessChange(parseFloat(e.target.value))}
-                className="w-20 px-2 py-1 text-sm border rounded-md"
+                onChange={(value) => onLayerThicknessChange(typeof value === 'number' ? value : 0.1)}
+                min={0.1}
+                step={0.1}
+                size="xs"
+                w={80}
               />
-              <span className="ml-2 text-xs text-muted-foreground">mm</span>
-            </div>
-          </div>
+              <Text size="xs" c="dimmed">mm</Text>
+            </Group>
+          </Stack>
           
           {/* Action Buttons */}
-          <div className="space-y-3">
+          <Stack gap="sm">
             <Button
               onClick={onExport}
               disabled={!file}
-              className="w-full"
+              fullWidth
               variant="outline"
             >
               Export SVG Layers
             </Button>
-          </div>
-        </div>
+          </Stack>
+        </Stack>
       </ScrollArea>
       
       {/* View Toggle */}
-      <div className="border-t p-4">
-        <div className="space-y-2">
-          <label className="text-sm font-medium">View Mode</label>
-          <div className="grid grid-cols-2 gap-2">
+      <Box style={{ borderTop: '1px solid #e9ecef', padding: '1rem' }}>
+        <Stack gap="xs">
+          <Text size="sm" fw={500}>View Mode</Text>
+          <Group grow>
             <Button 
               variant={viewMode === '3d' ? 'default' : 'outline'}
               size="sm"
               onClick={() => onViewModeChange('3d')}
-              className="w-full"
             >
               3D View
             </Button>
@@ -154,13 +218,12 @@ export function Sidebar({
               variant={viewMode === '2d' ? 'default' : 'outline'}
               size="sm"
               onClick={() => onViewModeChange('2d')}
-              className="w-full"
             >
               2D View
             </Button>
-          </div>
-        </div>
-      </div>
-    </div>
+          </Group>
+        </Stack>
+      </Box>
+    </Box>
   );
 } 
