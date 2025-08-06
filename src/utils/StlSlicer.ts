@@ -3,6 +3,26 @@ import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
 import { categorizePaths, textToSvgPath } from './pathHelpers'
 // @ts-ignore
 import {ClipperLib} from "../utils/clipper";
+// @ts-ignore
+import * as makerjs from 'makerjs';
+
+// Type declarations for maker.js since no official types exist
+interface MakerJSModel {
+  paths?: { [id: string]: MakerJSPath };
+  models?: { [id: string]: MakerJSModel };
+  units?: string;
+}
+
+interface MakerJSPath {
+  type: string;
+  origin: [number, number];
+  end?: [number, number];
+}
+
+interface MakerJSPoint {
+  0: number;
+  1: number;
+}
 
 export type Axis = 'x' | 'y' | 'z';
 export type LayerData = {
@@ -726,13 +746,34 @@ export class StlSlicer {
     paths.forEach((path, index) => {
       const isExternal = categories[index] === "external";
       if(isExternal){
-        //draw a perimiter path around expternal path using clipper offset function
-        const offsetPath = ClipperLib.JS.Clipper.Offset(path, 0.5, ClipperLib.JS.JoinType.jtRound, ClipperLib.JS.EndType.etClosedPolygon);
-        if (offsetPath.length > 0) {
-          const offsetPathData = offsetPath.map((point:any, index:any) => `${index === 0 ? 'M' : 'L'}${point.x.toFixed(3)},${point.y.toFixed(3)}`)
-                                          .join(' ') + 'Z';
-          svg += `\n<path d="${offsetPathData}" fill="none" id="layer-${layer.index}-perimeter" stroke="purple" stroke-width="0.3" />\n`;
-          pathCount++;
+        try {
+          // Convert THREE.Vector2 path to ClipperLib format
+          const clipperPath = path.map(point => ({
+            X: Math.round(point.x * 1000), // Scale up for precision
+            Y: Math.round(point.y * 1000)
+          }));
+          
+          // Use ClipperOffset instead of Clipper.Offset
+          const co = new ClipperLib.ClipperOffset();
+          co.AddPath(clipperPath, ClipperLib.JoinType.jtRound, ClipperLib.EndType.etClosedPolygon);
+          
+          const offsetPaths = new ClipperLib.Paths();
+          co.Execute(offsetPaths, 500); // 0.5mm offset scaled by 1000
+          
+          // ClipperLib.Paths is an array-like object, cast to any[] for proper handling
+          const offsetPathsArray = offsetPaths as any[];
+          if (offsetPathsArray.length > 0 && offsetPathsArray[0].length > 0) {
+            // Convert back to regular coordinates and create SVG path
+            const offsetPathData = offsetPathsArray[0].map((point: any, pointIndex: number) => 
+              `${pointIndex === 0 ? 'M' : 'L'}${(point.X / 1000).toFixed(3)},${(point.Y / 1000).toFixed(3)}`
+            ).join(' ') + 'Z';
+            
+            svg += `\n<path d="${offsetPathData}" fill="none" id="layer-${layer.index}-perimeter" stroke="purple" stroke-width="0.3" />\n`;
+            pathCount++;
+          }
+        } catch (offsetError) {
+          console.warn(`[StlSlicer] Failed to create offset path for layer ${layer.index}, path ${index}:`, offsetError);
+          // Continue without the offset path
         }
       }
 
@@ -804,5 +845,281 @@ export class StlSlicer {
     this.boundingBox = this.geometry.boundingBox ? this.geometry.boundingBox.clone() : null;
 
     console.log(`[StlSlicer] Model rotated by x: ${rotation.x || 0}°, y: ${rotation.y || 0}°, z: ${rotation.z || 0}°`);
+  }
+
+  /**
+   * Convert a single path (array of Vector2 points) to maker.js line segments
+   */
+  private pathToMakerJSLines(path: Array<THREE.Vector2>, pathId: string): { [id: string]: MakerJSPath } {
+    const lines: { [id: string]: MakerJSPath } = {};
+    
+    if (path.length < 2) {
+      console.warn(`[StlSlicer] Path ${pathId} has less than 2 points, skipping`);
+      return lines;
+    }
+
+    // Create line segments between consecutive points
+    for (let i = 0; i < path.length - 1; i++) {
+      const start = path[i];
+      const end = path[i + 1];
+      
+      // Skip zero-length segments
+      if (start.distanceTo(end) < 0.0001) {
+        continue;
+      }
+
+      const lineId = `${pathId}_line_${i}`;
+      lines[lineId] = {
+        type: 'line',
+        origin: [start.x, start.y],
+        end: [end.x, end.y]
+      };
+    }
+
+    return lines;
+  }
+
+  /**
+   * Helper function to convert THREE.Vector2 path to polygon format for categorization
+   */
+  private pathToPolygon(path: Array<THREE.Vector2>): Array<[number, number]> {
+    return path.map(point => [point.x, point.y]);
+  }
+
+  /**
+   * Check if a point is inside a polygon using ray casting algorithm
+   */
+  private isPointInPolygon(point: [number, number], polygon: Array<[number, number]>): boolean {
+    const [px, py] = point;
+    let inside = false;
+
+    for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+      const [xi, yi] = polygon[i];
+      const [xj, yj] = polygon[j];
+
+      const intersect = ((yi > py) !== (yj > py)) &&
+        (px < (xj - xi) * (py - yi) / (yj - yi) + xi);
+
+      if (intersect) inside = !inside;
+    }
+
+    return inside;
+  }
+
+  /**
+   * Check if one polygon is completely contained within another
+   */
+  private isContained(innerPolygon: Array<[number, number]>, outerPolygon: Array<[number, number]>): boolean {
+    return innerPolygon.every(point => this.isPointInPolygon(point, outerPolygon));
+  }
+
+  /**
+   * Categorize paths as external or internal based on containment
+   */
+  private categorizePaths(paths: Array<Array<THREE.Vector2>>): Array<'external' | 'internal'> {
+    console.log(`[StlSlicer] Categorizing ${paths.length} paths`);
+    
+    const pathPolygons = paths.map(path => this.pathToPolygon(path));
+    const categories: Array<'external' | 'internal'> = paths.map(() => 'external'); // Default to external
+
+    pathPolygons.forEach((outerPolygon, i) => {
+      pathPolygons.forEach((innerPolygon, j) => {
+        if (i !== j && this.isContained(innerPolygon, outerPolygon)) {
+          categories[j] = 'internal';
+        }
+      });
+    });
+
+    return categories;
+  }
+
+  /**
+   * Convert all paths from a layer to a maker.js model with categorization
+   */
+  pathsToMakerJSModel(paths: Array<Array<THREE.Vector2>>, layerIndex?: number): MakerJSModel {
+    const model: MakerJSModel = {
+      paths: {},
+      units: 'mm' // Assuming millimeters, adjust as needed
+    };
+
+    if (!paths || paths.length === 0) {
+      console.warn('[StlSlicer] No paths provided for maker.js model generation');
+      return model;
+    }
+
+    console.log(`[StlSlicer] Converting ${paths.length} paths to maker.js model`);
+
+    // Categorize paths as external or internal
+    const categories = this.categorizePaths(paths);
+
+    // Convert each path to maker.js line segments with category information
+    paths.forEach((path, pathIndex) => {
+      const category = categories[pathIndex];
+      const pathId = layerIndex !== undefined 
+        ? `layer_${layerIndex}_${category}_path_${pathIndex}` 
+        : `${category}_path_${pathIndex}`;
+      
+      const lines = this.pathToMakerJSLines(path, pathId);
+      
+      // Add all lines from this path to the model
+      Object.assign(model.paths!, lines);
+    });
+
+    const totalLines = Object.keys(model.paths!).length;
+    const externalCount = categories.filter(c => c === 'external').length;
+    const internalCount = categories.filter(c => c === 'internal').length;
+    
+    console.log(`[StlSlicer] Generated maker.js model with ${totalLines} line segments (${externalCount} external paths, ${internalCount} internal paths)`);
+
+    return model;
+  }
+
+  /**
+   * Generate a maker.js model from layer data
+   */
+  generateMakerJSModel(layer: LayerData): MakerJSModel {
+    return this.pathsToMakerJSModel(layer.paths, layer.index);
+  }
+
+  /**
+   * Generate maker.js models for multiple layers
+   */
+  generateMakerJSModels(layers: LayerData[]): MakerJSModel[] {
+    return layers.map(layer => this.generateMakerJSModel(layer));
+  }
+
+  /**
+   * Export a maker.js model to SVG string using maker.js exporter with category-based styling
+   */
+  makerJSModelToSVG(model: MakerJSModel, options?: any): string {
+    try {
+      // Check if we have categorized paths (paths with external/internal in their IDs)
+      const hasCategorizedPaths = model.paths && Object.keys(model.paths).some(id => 
+        id.includes('_external_') || id.includes('_internal_')
+      );
+
+      if (hasCategorizedPaths) {
+        // Use custom SVG generation with category-based styling
+        return this.generateCategorizedSVG(model, options);
+      } else {
+        // Use default maker.js exporter for non-categorized models
+        const defaultOptions = {
+          strokeWidth: '0.1mm',
+          stroke: '#000000',
+          fill: 'none',
+          ...options
+        };
+
+        return (makerjs as any).exporter.toSVG(model, defaultOptions);
+      }
+    } catch (error) {
+      console.error('[StlSlicer] Error exporting maker.js model to SVG:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Generate SVG with category-based styling for external and internal paths
+   */
+  private generateCategorizedSVG(model: MakerJSModel, options?: any): string {
+    if (!model.paths || Object.keys(model.paths).length === 0) {
+      return '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><text x="10" y="50" fill="red">No paths in model</text></svg>';
+    }
+
+    // Calculate bounding box
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    
+    Object.values(model.paths).forEach(path => {
+      if (path.origin) {
+        minX = Math.min(minX, path.origin[0]);
+        minY = Math.min(minY, path.origin[1]);
+        maxX = Math.max(maxX, path.origin[0]);
+        maxY = Math.max(maxY, path.origin[1]);
+      }
+      if (path.end) {
+        minX = Math.min(minX, path.end[0]);
+        minY = Math.min(minY, path.end[1]);
+        maxX = Math.max(maxX, path.end[0]);
+        maxY = Math.max(maxY, path.end[1]);
+      }
+    });
+
+    // Add padding
+    const padding = 10;
+    const width = maxX - minX + 2 * padding;
+    const height = maxY - minY + 2 * padding;
+
+    // Styling options with defaults
+    const externalStroke = options?.externalStroke || '#FF0000'; // Red for external
+    const internalStroke = options?.internalStroke || '#000000'; // Black for internal
+    const externalStrokeWidth = options?.externalStrokeWidth || '0.3';
+    const internalStrokeWidth = options?.internalStrokeWidth || '0.1';
+    const fill = options?.fill || 'none';
+
+    // Generate SVG
+    let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="${minX - padding} ${minY - padding} ${width} ${height}">\n`;
+    
+    // Add external paths first (so they appear behind internal paths if overlapping)
+    svg += `<g id="external-paths" stroke="${externalStroke}" stroke-width="${externalStrokeWidth}" fill="${fill}">\n`;
+    Object.entries(model.paths).forEach(([id, path]) => {
+      if (id.includes('_external_') && path.type === 'line' && path.origin && path.end) {
+        svg += `  <line x1="${path.origin[0]}" y1="${path.origin[1]}" x2="${path.end[0]}" y2="${path.end[1]}" id="${id}" />\n`;
+      }
+    });
+    svg += '</g>\n';
+
+    // Add internal paths
+    svg += `<g id="internal-paths" stroke="${internalStroke}" stroke-width="${internalStrokeWidth}" fill="${fill}">\n`;
+    Object.entries(model.paths).forEach(([id, path]) => {
+      if (id.includes('_internal_') && path.type === 'line' && path.origin && path.end) {
+        svg += `  <line x1="${path.origin[0]}" y1="${path.origin[1]}" x2="${path.end[0]}" y2="${path.end[1]}" id="${id}" />\n`;
+      }
+    });
+    svg += '</g>\n';
+
+    // Add any uncategorized paths
+    const uncategorizedPaths = Object.entries(model.paths).filter(([id]) => 
+      !id.includes('_external_') && !id.includes('_internal_')
+    );
+    
+    if (uncategorizedPaths.length > 0) {
+      svg += `<g id="uncategorized-paths" stroke="#888888" stroke-width="0.1" fill="${fill}">\n`;
+      uncategorizedPaths.forEach(([id, path]) => {
+        if (path.type === 'line' && path.origin && path.end) {
+          svg += `  <line x1="${path.origin[0]}" y1="${path.origin[1]}" x2="${path.end[0]}" y2="${path.end[1]}" id="${id}" />\n`;
+        }
+      });
+      svg += '</g>\n';
+    }
+
+    svg += '</svg>';
+    return svg;
+  }
+
+  /**
+   * Get maker.js model as JSON string for debugging or export
+   */
+  makerJSModelToJSON(model: MakerJSModel): string {
+    return JSON.stringify(model, null, 2);
+  }
+
+  /**
+   * Combine multiple maker.js models into a single model
+   * Useful for creating a complete model from all layers
+   */
+  combineMakerJSModels(models: MakerJSModel[], modelName: string = 'combined'): MakerJSModel {
+    const combinedModel: MakerJSModel = {
+      models: {},
+      units: models[0]?.units || 'mm'
+    };
+
+    models.forEach((model, index) => {
+      if (model.paths && Object.keys(model.paths).length > 0) {
+        combinedModel.models![`layer_${index}`] = model;
+      }
+    });
+
+    console.log(`[StlSlicer] Combined ${models.length} maker.js models into '${modelName}'`);
+    return combinedModel;
   }
 }

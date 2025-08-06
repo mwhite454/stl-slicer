@@ -333,9 +333,10 @@ function StlSlicerContent() {
     try {
       const svgContents = layers.map(layer => ({
         layer,
-        svg: slicerRef.current!.generateSVG(layer)
+        svg: slicerRef.current!.generateSVG(layer),
+        makerjsSVG: slicerRef.current!.makerJSModelToSVG(slicerRef.current!.generateMakerJSModel(layer))
       }));
-      
+
       await exportSvgZip(svgContents, `${file.name.replace('.stl', '')}_${axis}_${layerThickness}mm_layers.zip`);
     } catch (err) {
       setError('Failed to export layers');
