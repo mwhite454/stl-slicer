@@ -2,113 +2,9 @@
 
 import React, { useState, useEffect } from "react";
 import JSZip from "jszip";
-import {ClipperLib} from "../../utils/clipper";
-import { SVG } from "./SVG";
-const svgPathParser = require('svg-path-parser');
+import { ReactSVGPanZoom, Tool, Value } from "react-svg-pan-zoom";
+import { parseSvgPaths, svgPathToPolygons, createOffsetPath, polygonsToSvgPath } from "./datahelpers";
 
-function parseSvgPaths(svgArray: string[]) {
-    const paths: any[] = [];
-    svgArray.forEach(svg => {
-        const matches = svg.match(/<path[^>]*d="([^"]*)"/g); // Extract all 'd' attributes
-        if (matches) {
-            matches.forEach(match => {
-                const pathData = /d="([^"]*)"/.exec(match)[1];
-                const parsed = svgPathParser(pathData);
-                paths.push(parsed);
-            });
-        }
-    });
-    return paths;
-}
-
-type SvgPathCommand = {
-    x?: number;
-    y?: number;
-    [key: string]: any;
-};
-
-function svgPathToPolygons(parsedPaths: any[], scaleFactor = 1000) {
-    const polygons: any[] = [];
-    parsedPaths.forEach(parsedPath => {
-        const polygon: any[] = [];
-        parsedPath.forEach((command: SvgPathCommand) => {
-            if (command.x !== undefined && command.y !== undefined) {
-          polygon.push({
-              X: Math.round(command.x * scaleFactor),
-              Y: Math.round(command.y * scaleFactor),
-          });
-            }
-        });
-        if (polygon.length) polygons.push(polygon);
-    });
-    return polygons;
-}
-
-interface IntPointType {
-  X: number;
-  Y: number;
-}
-
-type Polygon = IntPointType[];
-type Polygons = Polygon[];
-
-// This function unions all polygons into one, then offsets the result by offsetDistance.
-// The result is a single perimeter polygon that overlaps all input polygons by at least offsetDistance.
-function createOffsetPath(
-  polygons: Polygons,
-  offsetDistance: number,
-  scaleFactor: number = 1000
-): Polygons {
-  if (!polygons.length) return [];
-
-  // Union all polygons into a single shape
-  const clipper = new ClipperLib.Clipper();
-  const solution: Polygons = [];
-  clipper.AddPaths(polygons, ClipperLib.PolyType.ptSubject, true);
-  clipper.Execute(
-    ClipperLib.ClipType.ctUnion,
-    solution,
-    ClipperLib.PolyFillType.pftNonZero,
-    ClipperLib.PolyFillType.pftNonZero
-  );
-
-  // Simplify the unioned shape to remove overlaps
-  const simplifiedSolution = ClipperLib.Clipper.SimplifyPolygons(solution, ClipperLib.PolyFillType.pftNonZero);
-
-  // Offset the unioned shape outward by offsetDistance
-  const offsetter = new ClipperLib.ClipperOffset();
-  offsetter.AddPaths(simplifiedSolution, ClipperLib.JoinType.jtRound, ClipperLib.EndType.etClosedPolygon);
-  const offsetSolution: Polygons = [];
-  offsetter.Execute(offsetSolution, offsetDistance * scaleFactor);
-
-  // Apply additional offset passes to ensure minimum width
-  const expandedOffsetter = new ClipperLib.ClipperOffset();
-  expandedOffsetter.AddPaths(offsetSolution, ClipperLib.JoinType.jtRound, ClipperLib.EndType.etClosedPolygon);
-  const expandedSolution: Polygons = [];
-  expandedOffsetter.Execute(expandedSolution, offsetDistance * scaleFactor * 2);
-
-  return ClipperLib.Clipper.SimplifyPolygons(expandedSolution, ClipperLib.PolyFillType.pftNonZero);
-}
-
-interface PolygonsToSvgPathPoint {
-  X: number;
-  Y: number;
-}
-
-type PolygonsToSvgPathPolygon = PolygonsToSvgPathPoint[];
-
-function polygonsToSvgPath(
-  polygons: PolygonsToSvgPathPolygon[],
-  scaleFactor: number = 1000
-): string {
-  return polygons
-    .map((polygon: PolygonsToSvgPathPolygon) => {
-      return polygon
-        .map((point: PolygonsToSvgPathPoint) => `${point.X / scaleFactor},${point.Y / scaleFactor}`)
-        .join(' L ');
-    })
-    .join(' ');
-}
 
 const SvgCombinerPage = () => {
   const [canvasWidth, setCanvasWidth] = useState<number>(482); // Default width
@@ -120,7 +16,22 @@ const SvgCombinerPage = () => {
   const [perimeterOffset, setPerimeterOffset] = useState<number>(10); // Default perimeter offset
   const [folderName, setFolderName] = useState<string>("combined_svgs");
   const [previewPage, setPreviewPage] = useState<number>(0);
-  const [svgZoom, setSvgZoom] = useState<number>(1);
+  const [tool, setTool] = useState<Tool>('auto');
+  const [value, setValue] = useState<Value>({
+    version: 2,
+    mode: 'idle',
+    focus: false,
+    a: 1, b: 0, c: 0, d: 1, e: 0, f: 0,
+    viewerWidth: 800,
+    viewerHeight: 600,
+    SVGWidth: 800,
+    SVGHeight: 600,
+    startX: null,
+    startY: null,
+    endX: null,
+    endY: null,
+    miniatureOpen: false
+  });
 
   const combineAndOptimizeSVGs = async (files: File[]) => {
     const parser = new DOMParser();
@@ -336,13 +247,32 @@ const SvgCombinerPage = () => {
                   </button>
                 );
               })}</h2>
-              <div className="border border-gray-300  p-4 bg-white shadow-lg w-full overflow-auto">
-                <SVG
-                  svgContent={combinedSvgContent[previewPage] || ""}
-                  width={canvasWidth}
-                  height={canvasHeight}
-                  zoom={svgZoom}
-                />
+              <div className="border border-gray-300 p-4 bg-white shadow-lg w-full" style={{ height: '600px' }}>
+                <ReactSVGPanZoom
+                  width={800}
+                  height={600}
+                  tool={tool}
+                  value={value}
+                  onChangeTool={setTool}
+                  onChangeValue={setValue}
+                  detectAutoPan={false}
+                  detectPinchGesture={true}
+                  miniatureProps={{ position: 'right', background: '#f8f9fa', width: 100, height: 80 }}
+                >
+                  <svg
+                    width={canvasWidth}
+                    height={canvasHeight}
+                    viewBox={`0 0 ${canvasWidth} ${canvasHeight}`}
+                    dangerouslySetInnerHTML={{ 
+                      __html: (() => {
+                        const svgContent = combinedSvgContent[previewPage] || "";
+                        // Extract inner content from serialized SVG
+                        const match = svgContent.match(/<svg[^>]*>([\s\S]*)<\/svg>/);
+                        return match ? match[1] : svgContent;
+                      })()
+                    }}
+                  />
+                </ReactSVGPanZoom>
               </div>
             </div>
           </>

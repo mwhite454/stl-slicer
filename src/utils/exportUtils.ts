@@ -14,16 +14,17 @@ export const exportSvg = (svgContent: string, filename: string) => {
  * Export multiple SVG files as a ZIP archive
  */
 export const exportSvgZip = async (
-  svgContents: { layer: LayerData; svg: string }[],
+  svgContents: { layer: LayerData; svg: string; makerjsSVG: string }[],
   baseName: string,
   axis: 'x' | 'y' | 'z' = 'z' // Default to 'z' axis
 ) => {
   const zip = new JSZip();
 
   // Add each SVG to the ZIP file
-  svgContents.forEach(({ layer, svg }) => {
+  svgContents.forEach(({ layer, svg, makerjsSVG }) => {
     const filename = `${baseName}_layer_${layer.index}_${axis}_axis.svg`;
     zip.file(filename, svg);
+    zip.file(`${baseName}_layer_${layer.index}_${axis}_axis_makerjs.svg`, makerjsSVG);
   });
 
   // Generate the ZIP file
