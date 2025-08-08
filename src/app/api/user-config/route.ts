@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { turso } from '@/lib/turso';
+import prisma from '@/lib/prisma';
 import { nanoid } from 'nanoid';
 
 export async function GET(request: NextRequest) {
@@ -12,16 +12,20 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'User ID is required' }, { status: 400 });
     }
 
-    const result = await turso.execute({
-      sql: 'SELECT * FROM user_configs WHERE user_id = ? AND config_name = ?',
-      args: [userId, configName]
+    const config = await prisma.userConfig.findUnique({
+      where: {
+        userId_configName: {
+          userId,
+          configName
+        }
+      }
     });
 
-    if (result.rows.length === 0) {
+    if (!config) {
       return NextResponse.json({ error: 'Configuration not found' }, { status: 404 });
     }
 
-    return NextResponse.json({ config: result.rows[0] });
+    return NextResponse.json({ config });
   } catch (error) {
     console.error('Error fetching user config:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
@@ -40,36 +44,30 @@ export async function POST(request: NextRequest) {
     const configId = nanoid();
     const now = new Date().toISOString();
 
-    const result = await turso.execute({
-      sql: `INSERT INTO user_configs (
-        id, user_id, config_name, laser_cutter_width, laser_cutter_height, kerf,
-        layer_height, default_axis, material_thickness, cut_speed, cut_power,
-        part_spacing, margin, optimize_layout, theme, units, auto_save,
-        show_kerf_preview, custom_settings, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      args: [
-        configId,
+    const config = await prisma.userConfig.create({
+      data: {
+        id: configId,
         userId,
         configName,
-        configData.laserCutterWidth || 300.0,
-        configData.laserCutterHeight || 200.0,
-        configData.kerf || 0.1,
-        configData.layerHeight || 3.0,
-        configData.defaultAxis || 'z',
-        configData.materialThickness || 3.0,
-        configData.cutSpeed || 10.0,
-        configData.cutPower || 80.0,
-        configData.partSpacing || 2.0,
-        configData.margin || 5.0,
-        configData.optimizeLayout || true,
-        configData.theme || 'light',
-        configData.units || 'mm',
-        configData.autoSave || true,
-        configData.showKerfPreview || true,
-        JSON.stringify(configData.customSettings || {}),
-        now,
-        now
-      ]
+        laserCutterWidth: configData.laserCutterWidth || 300.0,
+        laserCutterHeight: configData.laserCutterHeight || 200.0,
+        kerf: configData.kerf || 0.1,
+        layerHeight: configData.layerHeight || 3.0,
+        defaultAxis: configData.defaultAxis || 'z',
+        materialThickness: configData.materialThickness || 3.0,
+        cutSpeed: configData.cutSpeed || 10.0,
+        cutPower: configData.cutPower || 80.0,
+        partSpacing: configData.partSpacing || 2.0,
+        margin: configData.margin || 5.0,
+        optimizeLayout: configData.optimizeLayout || true,
+        theme: configData.theme || 'light',
+        units: configData.units || 'mm',
+        autoSave: configData.autoSave || true,
+        showKerfPreview: configData.showKerfPreview || true,
+        customSettings: JSON.stringify(configData.customSettings || {}),
+        createdAt: now,
+        updatedAt: now
+      }
     });
 
     return NextResponse.json({ 
@@ -94,38 +92,35 @@ export async function PUT(request: NextRequest) {
 
     const now = new Date().toISOString();
 
-    const result = await turso.execute({
-      sql: `UPDATE user_configs SET 
-        laser_cutter_width = ?, laser_cutter_height = ?, kerf = ?,
-        layer_height = ?, default_axis = ?, material_thickness = ?, 
-        cut_speed = ?, cut_power = ?, part_spacing = ?, margin = ?,
-        optimize_layout = ?, theme = ?, units = ?, auto_save = ?, 
-        show_kerf_preview = ?, custom_settings = ?, updated_at = ?
-        WHERE user_id = ? AND config_name = ?`,
-      args: [
-        configData.laserCutterWidth || 300.0,
-        configData.laserCutterHeight || 200.0,
-        configData.kerf || 0.1,
-        configData.layerHeight || 3.0,
-        configData.defaultAxis || 'z',
-        configData.materialThickness || 3.0,
-        configData.cutSpeed || 10.0,
-        configData.cutPower || 80.0,
-        configData.partSpacing || 2.0,
-        configData.margin || 5.0,
-        configData.optimizeLayout || true,
-        configData.theme || 'light',
-        configData.units || 'mm',
-        configData.autoSave || true,
-        configData.showKerfPreview || true,
-        JSON.stringify(configData.customSettings || {}),
-        now,
-        userId,
-        configName
-      ]
+    const config = await prisma.userConfig.update({
+      where: {
+        userId_configName: {
+          userId,
+          configName
+        }
+      },
+      data: {
+        laserCutterWidth: configData.laserCutterWidth || 300.0,
+        laserCutterHeight: configData.laserCutterHeight || 200.0,
+        kerf: configData.kerf || 0.1,
+        layerHeight: configData.layerHeight || 3.0,
+        defaultAxis: configData.defaultAxis || 'z',
+        materialThickness: configData.materialThickness || 3.0,
+        cutSpeed: configData.cutSpeed || 10.0,
+        cutPower: configData.cutPower || 80.0,
+        partSpacing: configData.partSpacing || 2.0,
+        margin: configData.margin || 5.0,
+        optimizeLayout: configData.optimizeLayout || true,
+        theme: configData.theme || 'light',
+        units: configData.units || 'mm',
+        autoSave: configData.autoSave || true,
+        showKerfPreview: configData.showKerfPreview || true,
+        customSettings: JSON.stringify(configData.customSettings || {}),
+        updatedAt: now
+      }
     });
 
-    if (result.rowsAffected === 0) {
+    if (!config) {
       return NextResponse.json({ error: 'Configuration not found' }, { status: 404 });
     }
 
@@ -149,12 +144,16 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: 'User ID is required' }, { status: 400 });
     }
 
-    const result = await turso.execute({
-      sql: 'DELETE FROM user_configs WHERE user_id = ? AND config_name = ?',
-      args: [userId, configName]
+    const config = await prisma.userConfig.delete({
+      where: {
+        userId_configName: {
+          userId,
+          configName
+        }
+      }
     });
 
-    if (result.rowsAffected === 0) {
+    if (!config) {
       return NextResponse.json({ error: 'Configuration not found' }, { status: 404 });
     }
 

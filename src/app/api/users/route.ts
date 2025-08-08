@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { turso } from '@/lib/turso';
+import prisma from '@/lib/prisma';
 import { nanoid } from 'nanoid';
 
 export async function GET(request: NextRequest) {
@@ -12,18 +12,22 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Email or User ID is required' }, { status: 400 });
     }
 
-    const sql = email 
-      ? 'SELECT * FROM users WHERE email = ?'
-      : 'SELECT * FROM users WHERE id = ?';
-    const args = [email || userId];
+    let user;
+    if (email) {
+      user = await prisma.user.findUnique({
+        where: { email }
+      });
+    } else {
+      user = await prisma.user.findUnique({
+        where: { id: userId! }
+      });
+    }
 
-    const result = await turso.execute({ sql, args });
-
-    if (result.rows.length === 0) {
+    if (!user) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
 
-    return NextResponse.json({ user: result.rows[0] });
+    return NextResponse.json({ user });
   } catch (error) {
     console.error('Error fetching user:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
@@ -40,30 +44,37 @@ export async function POST(request: NextRequest) {
     }
 
     // Check if user already exists
-    const existingUser = await turso.execute({
-      sql: 'SELECT id FROM users WHERE email = ?',
-      args: [email]
+    const existingUser = await prisma.user.findUnique({
+      where: { email }
     });
 
-    if (existingUser.rows.length > 0) {
+    if (existingUser) {
       return NextResponse.json({ error: 'User already exists' }, { status: 409 });
     }
 
     const userId = nanoid();
     const now = new Date().toISOString();
 
-    await turso.execute({
-      sql: 'INSERT INTO users (id, email, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
-      args: [userId, email, name || null, now, now]
+    const user = await prisma.user.create({
+      data: {
+        id: userId,
+        email,
+        name: name || null,
+        createdAt: now,
+        updatedAt: now
+      }
     });
 
     // Create default configuration for new user
     const configId = nanoid();
-    await turso.execute({
-      sql: `INSERT INTO user_configs (
-        id, user_id, config_name, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?)`,
-      args: [configId, userId, 'default', now, now]
+    await prisma.userConfig.create({
+      data: {
+        id: configId,
+        userId,
+        configName: 'default',
+        createdAt: now,
+        updatedAt: now
+      }
     });
 
     return NextResponse.json({ 
@@ -88,12 +99,16 @@ export async function PUT(request: NextRequest) {
 
     const now = new Date().toISOString();
 
-    const result = await turso.execute({
-      sql: 'UPDATE users SET email = ?, name = ?, updated_at = ? WHERE id = ?',
-      args: [email, name || null, now, userId]
+    const user = await prisma.user.update({
+      where: { id: userId },
+      data: {
+        email,
+        name: name || null,
+        updatedAt: now
+      }
     });
 
-    if (result.rowsAffected === 0) {
+    if (!user) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
 
