@@ -18,12 +18,13 @@ export function WorkspaceStage() {
   const selectedIds = useWorkspaceStore((s) => s.selection.selectedIds);
   const selectOnly = useWorkspaceStore((s) => s.selectOnly);
   const updateItemPosition = useWorkspaceStore((s) => s.updateItemPosition);
+  const activationDistance = useWorkspaceStore((s) => s.ui.dragActivationDistance);
 
   const { ref: svgRef } = useElementSize();
   const contentGroupRef = useRef<SVGGElement | null>(null);
-  // TODO: Make activation distance user-configurable via workspace settings
+  // Sensors depend on activation distance from store
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 1 } })
+    useSensor(PointerSensor, { activationConstraint: { distance: activationDistance } })
   );
   const dragOriginRef = useRef<DragOrigin>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -142,17 +143,62 @@ export function WorkspaceStage() {
     setDragPosMm(null);
   };
 
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    // Nudge selected item(s) with arrow keys
+    const id = selectedIds[0];
+    if (!id) return;
+    let dx = 0;
+    let dy = 0;
+    if (e.key === 'ArrowLeft') dx = -1;
+    else if (e.key === 'ArrowRight') dx = 1;
+    else if (e.key === 'ArrowUp') dy = -1;
+    else if (e.key === 'ArrowDown') dy = 1;
+    else return;
+    e.preventDefault();
+    const item = items.find((it) => it.id === id);
+    if (!item) return;
+    const step = e.shiftKey && grid.size > 0 ? grid.size : 1;
+    let nx = item.position.x + dx * step;
+    let ny = item.position.y + dy * step;
+    // optional snapping when shift used is already applied by step; if grid.snap, snap final
+    if (grid.snap && grid.size > 0) {
+      nx = Math.round(nx / grid.size) * grid.size;
+      ny = Math.round(ny / grid.size) * grid.size;
+    }
+    nx = Math.max(0, Math.min(bounds.width - item.rect.width, nx));
+    ny = Math.max(0, Math.min(bounds.height - item.rect.height, ny));
+    updateItemPosition(id, nx, ny);
+  };
+
   return (
-    <Box style={{ width: '100%', height: 420 }}>
+    <Box
+      style={{ width: '100%', height: 420, outline: 'none' }}
+      tabIndex={0}
+      onKeyDown={handleKeyDown}
+    >
       <DndContext sensors={sensors} onDragStart={onDragStart} onDragMove={onDragMove} onDragEnd={onDragEnd}>
         <svg
           ref={svgRef as any}
           width="100%"
           height="100%"
           viewBox={`0 0 ${bounds.width} ${bounds.height}`}
-          style={{ background: '#fff', border: '1px solid #e5e5e5', borderRadius: 8, userSelect: 'none', touchAction: 'none' }}
+          style={{ background: '#fff', border: '1px solid #e5e5e5', borderRadius: 8, userSelect: 'none', touchAction: 'none', outline: 'none' }}
+          className="workspace-svg"
           onClick={() => selectOnly(null)}
         >
+          <defs>
+            <style>{`
+              .workspace-svg:focus { outline: none !important; }
+              .workspace-svg *:focus { outline: none !important; }
+              .workspace-svg *:focus-visible { outline: none !important; }
+              .workspace-svg [aria-selected],
+              .workspace-svg [aria-pressed],
+              .workspace-svg [aria-roledescription],
+              .workspace-svg [role] {
+                outline: none !important;
+              }
+            `}</style>
+          </defs>
           {/* Pan/Zoom group in mm */}
           <g ref={contentGroupRef} transform={`translate(${viewport.pan.x} ${viewport.pan.y}) scale(${viewport.zoom})`}>
             {/* Grid */}
@@ -177,15 +223,35 @@ export function WorkspaceStage() {
                 const posX = activeId === it.id && dragPosMm ? dragPosMm.x : it.position.x;
                 const posY = activeId === it.id && dragPosMm ? dragPosMm.y : it.position.y;
                 return (
-                  <DraggablePath
-                    key={it.id}
-                    id={it.id}
-                    d={d}
-                    transform={transformForMakerPath(posX, posY, it.rect.height)}
-                    selected={sel}
-                    setPathRef={setPathRef}
-                    onClick={() => selectOnly(it.id)}
-                  />
+                  <g key={it.id}>
+                    <DraggablePath
+                      id={it.id}
+                      d={d}
+                      transform={transformForMakerPath(posX, posY, it.rect.height)}
+                      selected={sel}
+                      setPathRef={setPathRef}
+                      onClick={() => selectOnly(it.id)}
+                    />
+                    {sel && (
+                      <g pointerEvents="none">
+                        <rect
+                          x={posX}
+                          y={posY}
+                          width={it.rect.width}
+                          height={it.rect.height}
+                          fill="none"
+                          stroke="#1e90ff"
+                          strokeWidth={0.25}
+                          vectorEffect="non-scaling-stroke"
+                        />
+                        {/* corner dots */}
+                        <circle cx={posX} cy={posY} r={0.5} fill="#1e90ff" />
+                        <circle cx={posX + it.rect.width} cy={posY} r={0.5} fill="#1e90ff" />
+                        <circle cx={posX} cy={posY + it.rect.height} r={0.5} fill="#1e90ff" />
+                        <circle cx={posX + it.rect.width} cy={posY + it.rect.height} r={0.5} fill="#1e90ff" />
+                      </g>
+                    )}
+                  </g>
                 );
               }
               return null;
@@ -213,9 +279,19 @@ const DraggablePath = memo(function DraggablePath({ id, d, transform, selected, 
     <g
       ref={groupRef}
       {...listeners}
-      {...attributes}
+      role={undefined as any}
+      tabIndex={-1}
+      focusable={false as any}
       pointerEvents="all"
-      style={{ cursor: isDragging ? 'grabbing' : 'grab', touchAction: 'none' }}
+      style={{ cursor: isDragging ? 'grabbing' : 'grab', touchAction: 'none', outline: 'none', WebkitTapHighlightColor: 'transparent' as any, caretColor: 'transparent' as any }}
+      onMouseDown={(e) => {
+        // prevent focus ring/outline on click
+        e.preventDefault();
+      }}
+      onFocus={(e) => {
+        // force blur to avoid UA/mantine focus styling on SVG nodes
+        (e.currentTarget as any)?.blur?.();
+      }}
       onClick={(e) => {
         e.stopPropagation();
         onClick();
@@ -223,13 +299,19 @@ const DraggablePath = memo(function DraggablePath({ id, d, transform, selected, 
     >
       <path
         ref={(el) => setPathRef(id, el)}
+        focusable={false as any}
         d={d}
         transform={transform}
         fill="transparent"
-        stroke={selected ? '#1e90ff' : '#222'}
-        strokeWidth={selected ? 0.8 : 0.5}
+        stroke="#222"
+        strokeWidth={0.4}
+        vectorEffect="non-scaling-stroke"
         opacity={isDragging ? 0.9 : 1}
         pointerEvents="all"
+        style={{ outline: 'none' }}
+        onFocus={(e) => {
+          (e.currentTarget as any)?.blur?.();
+        }}
       />
     </g>
   );

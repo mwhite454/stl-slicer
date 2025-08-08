@@ -14,6 +14,8 @@ export function WorkspaceToolbar() {
   const setZoom = useWorkspaceStore((s) => s.setZoom);
   const setPan = useWorkspaceStore((s) => s.setPan);
   const addRectangle = useWorkspaceStore((s) => s.addRectangle);
+  const addManyRectangles = useWorkspaceStore((s) => s.addManyRectangles);
+  const clearItems = useWorkspaceStore((s) => s.clearItems);
 
   return (
     <Group wrap="nowrap" gap="sm" justify="space-between">
@@ -23,6 +25,15 @@ export function WorkspaceToolbar() {
           onClick={() => addRectangle({ width: 20, height: 10, x: 0, y: 0 })}
         >
           Add rectangle
+        </Button>
+        <Button
+          variant="light"
+          onClick={() => addManyRectangles({ count: 2000, width: 5, height: 5, margin: 1 })}
+        >
+          Add 2000 (stress test)
+        </Button>
+        <Button variant="subtle" color="red" onClick={() => clearItems()}>
+          Clear
         </Button>
       </Group>
 

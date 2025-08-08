@@ -41,4 +41,9 @@ export type WorkspaceState = {
   viewport: ViewportState;
   items: WorkspaceItem[];
   selection: SelectionState;
+  ui: UiSettings;
+};
+
+export type UiSettings = {
+  dragActivationDistance: number; // px to start drag
 };
