@@ -4,7 +4,7 @@ import React, { useState, useEffect } from "react";
 import JSZip from "jszip";
 import { ReactSVGPanZoom, Tool, Value } from "react-svg-pan-zoom";
 import { parseSvgPaths, svgPathToPolygons, createOffsetPath, polygonsToSvgPath } from "./datahelpers";
-
+import { Container, Title, Stack, Group, NumberInput, Select, FileInput, Button, Text } from "@mantine/core";
 
 const SvgCombinerPage = () => {
   const [canvasWidth, setCanvasWidth] = useState<number>(482); // Default width
@@ -12,7 +12,7 @@ const SvgCombinerPage = () => {
   const [dimensionType, setDimensionType] = useState<string>("mm"); // Default dimension type
   const [gapSize, setGapSize] = useState<number>(1); // default gap between items
   const [combinedSvgUrl, setCombinedSvgUrl] = useState<string | null>(null);
-  const [combinedSvgContent, setCombinedSvgContent] = useState<string | null>(null);
+  const [combinedSvgContent, setCombinedSvgContent] = useState<string[] | null>(null);
   const [perimeterOffset, setPerimeterOffset] = useState<number>(10); // Default perimeter offset
   const [folderName, setFolderName] = useState<string>("combined_svgs");
   const [previewPage, setPreviewPage] = useState<number>(0);
@@ -151,103 +151,84 @@ const SvgCombinerPage = () => {
   };
 
   return (
-    <div className="p-8 max-w-4xl mx-auto">
-      <h1 className="text-3xl font-bold mb-6 text-center">SVG Compiler</h1>
-      <div className="flex flex-col items-center space-y-4">
-        <div className="flex space-x-4">
-        <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Canvas Width
-            </label>
-            <input
-              type="number"
-              value={canvasWidth}
-              onChange={(e) => setCanvasWidth(Number(e.target.value))}
-              className="block w-full text-sm text-gray-900 border border-gray-300  bg-gray-50 focus:ring-2 focus:ring-blue-500 focus:outline-none"
-              min="1"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Canvas Height
-            </label>
-            <input
-              type="number"
-              value={canvasHeight}
-              onChange={(e) => setCanvasHeight(Number(e.target.value))}
-              className="block w-full text-sm text-gray-900 border border-gray-300  bg-gray-50 focus:ring-2 focus:ring-blue-500 focus:outline-none"
-              min="1"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Gap Size
-            </label>
-            <input
-                type="number"
-              value={gapSize}
-              onChange={e => setGapSize(Number(e.target.value))}
-              className="block w-full text-sm text-gray-900 border border-gray-300  bg-gray-50 focus:ring-2 focus:ring-blue-500 focus:outline-none"
-              min={0}
-            />
-          </div>
-            <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Perimeter Offset
-            </label>
-            <input
-                type="number"
-              value={perimeterOffset}
-              onChange={e => setPerimeterOffset(Number(e.target.value))}
-              className="block w-full text-sm text-gray-900 border border-gray-300  bg-gray-50 focus:ring-2 focus:ring-blue-500 focus:outline-none"
-              min={0}
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Dimension Type
-            </label>
-            <select
-              value={dimensionType}
-              onChange={(e) => setDimensionType(e.target.value)}
-              className="block w-full text-sm text-gray-900 border border-gray-300  bg-gray-50 focus:ring-2 focus:ring-blue-500 focus:outline-none"
-            >
-              <option value="mm">Millimeters</option>
-              <option value="inches">Inches</option>
-            </select>
-          </div>
-        </div>
-        <input
-          type="file"
+    <Container size="lg" py="xl">
+      <Title order={1} mb="xl" ta="center">SVG Compiler</Title>
+      <Stack align="center">
+        <Group>
+          <NumberInput
+            label="Canvas Width"
+            value={canvasWidth}
+            onChange={(value) => setCanvasWidth(typeof value === 'number' ? value : 0)}
+            min={1}
+          />
+          <NumberInput
+            label="Canvas Height"
+            value={canvasHeight}
+            onChange={(value) => setCanvasHeight(typeof value === 'number' ? value : 0)}
+            min={1}
+          />
+          <NumberInput
+            label="Gap Size"
+            value={gapSize}
+            onChange={(value) => setGapSize(typeof value === 'number' ? value : 0)}
+            min={0}
+          />
+          <NumberInput
+            label="Perimeter Offset"
+            value={perimeterOffset}
+            onChange={(value) => setPerimeterOffset(typeof value === 'number' ? value : 0)}
+            min={0}
+          />
+          <Select
+            label="Dimension Type"
+            data={[
+              { value: 'mm', label: 'Millimeters' },
+              { value: 'inches', label: 'Inches' }
+            ]}
+            value={dimensionType}
+            onChange={(value) => setDimensionType(value as string || 'mm')}
+          />
+        </Group>
+        <FileInput
+          label="Upload SVG files"
           multiple
           accept=".svg"
-          onChange={handleFilesUpload}
-          className="block w-full max-w-md text-sm text-gray-900 border border-gray-300  cursor-pointer bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+          placeholder="Select SVG files"
+          onChange={(files) => {
+            // Create a synthetic event to match the existing handler
+            const event = {
+              target: {
+                files: files || []
+              }
+            } as unknown as React.ChangeEvent<HTMLInputElement>;
+            handleFilesUpload(event);
+          }}
         />
         {combinedSvgContent && (
           <>
-            <div className="w-full mt-6 flex justify-center">
-              <a
-                href={combinedSvgUrl}
-                download={`combined_${folderName}_svgs.zip`}
-                className="px-4 py-2 text-white bg-blue-500  hover:bg-blue-600 focus:ring-2 focus:ring-blue-400 focus:outline-none"
-              >
-                Download Combined SVGs (ZIP)
-              </a>
-            </div>
-            <div className="w-full mt-8">
-              <h2 className="text-xl font-semibold mb-4"> {combinedSvgContent.map((page, index)=> {
-                return (
-                  <button
+            <Button
+              component="a"
+              href={combinedSvgUrl}
+              download={`combined_${folderName}_svgs.zip`} 
+              mt="md"
+            >
+              Download Combined SVGs (ZIP)
+            </Button>
+            <Stack w="100%" mt="xl">
+              <Text size="lg" fw={500} mb="sm">Preview Pages:</Text>
+              <Group mb="md">
+                {combinedSvgContent && combinedSvgContent.length > 0 && combinedSvgContent.map((page, index) => (
+                  <Button
                     key={index}
                     onClick={() => setPreviewPage(index)}
-                    className={`px-3 py-1 mr-2 mb-2 text-sm font-medium rounded ${previewPage === index ? "bg-blue-500 text-white" : "bg-gray-200 text-gray-700 hover:bg-gray-300"}`}
+                    variant={previewPage === index ? "filled" : "outline"}
+                    size="sm"
                   >
                     {index + 1}
-                  </button>
-                );
-              })}</h2>
-              <div className="border border-gray-300 p-4 bg-white shadow-lg w-full" style={{ height: '600px' }}>
+                  </Button>
+                ))}
+              </Group>
+              <div style={{ height: '600px' }}>
                 <ReactSVGPanZoom
                   width={800}
                   height={600}
@@ -265,21 +246,23 @@ const SvgCombinerPage = () => {
                     viewBox={`0 0 ${canvasWidth} ${canvasHeight}`}
                     dangerouslySetInnerHTML={{ 
                       __html: (() => {
+                        if (!combinedSvgContent || combinedSvgContent.length === 0) return "";
                         const svgContent = combinedSvgContent[previewPage] || "";
                         // Extract inner content from serialized SVG
                         const match = svgContent.match(/<svg[^>]*>([\s\S]*)<\/svg>/);
-                        return match ? match[1] : svgContent;
+                        return match ? match[1] : "";
                       })()
                     }}
                   />
                 </ReactSVGPanZoom>
               </div>
-            </div>
+            </Stack>
           </>
         )}
-      </div>
-    </div>
+      </Stack>
+    </Container>
   );
 };
 
 export default SvgCombinerPage;
+
