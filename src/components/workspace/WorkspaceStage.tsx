@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useRef, useState, memo } from 'react';
+import React, { useMemo, useRef, useState, useEffect, memo } from 'react';
 import { Box } from '@mantine/core';
 import { useElementSize } from '@mantine/hooks';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
@@ -22,9 +22,15 @@ export function WorkspaceStage() {
   const setZoom = useWorkspaceStore((s) => s.setZoom);
   const setPan = useWorkspaceStore((s) => s.setPan);
   const selectionOverlayOffsetPx = useWorkspaceStore((s) => s.ui.selectionOverlayOffsetPx);
+  const panSpeedMultiplier = useWorkspaceStore((s) => s.ui.panSpeedMultiplier);
+  const zoomSpeedMultiplier = useWorkspaceStore((s) => s.ui.zoomSpeedMultiplier);
+  const showPerfHud = useWorkspaceStore((s) => s.ui.showPerfHud);
+  const fitToBoundsRequestId = useWorkspaceStore((s) => s.ui.fitToBoundsRequestId);
 
   const { ref: svgRef } = useElementSize();
   const contentGroupRef = useRef<SVGGElement | null>(null);
+  const [fps, setFps] = useState(0);
+  const fpsRef = useRef({ last: performance.now(), frames: 0 });
   const [isPanning, setIsPanning] = useState(false);
   const panPointerRef = useRef<{ x: number; y: number } | null>(null);
   const panStartRef = useRef<{ x: number; y: number } | null>(null);
@@ -63,22 +69,29 @@ export function WorkspaceStage() {
   const clampZoom = (z: number) => Math.min(4, Math.max(0.25, z));
 
   const onWheel = (e: React.WheelEvent<SVGSVGElement>) => {
-    // Zoom with mouse wheel when inside grid
+    // Zoom anchored at cursor
     e.preventDefault();
-    e.stopPropagation();
-    const anchor = clientToMm(e.clientX, e.clientY);
-    if (!anchor) return;
-    // Use exponential scale for smooth zoom; deltaY>0 => zoom out
-    const scale = Math.exp(-e.deltaY * 0.001);
-    const z0 = viewport.zoom;
-    const z1 = clampZoom(z0 * scale);
-    if (z1 === z0) return;
-    // keep anchor position stable: (w + p1)*z1 = (w + p0)*z0
-    const p0 = viewport.pan;
-    const p1x = (z0 / z1) * (anchor.x + p0.x) - anchor.x;
-    const p1y = (z0 / z1) * (anchor.y + p0.y) - anchor.y;
-    setZoom(z1);
-    setPan({ x: p1x, y: p1y });
+    const svg = svgRef.current as unknown as SVGSVGElement | null;
+    const g = contentGroupRef.current;
+    if (!svg || !g) return;
+    const pt = svg.createSVGPoint();
+    pt.x = e.clientX;
+    pt.y = e.clientY;
+    const ctm = g.getScreenCTM();
+    if (!ctm) return;
+    const p = pt.matrixTransform(ctm.inverse());
+    const delta = -e.deltaY * Math.max(0.1, zoomSpeedMultiplier); // natural: scroll up to zoom in
+    const k = 0.0015; // sensitivity base
+    const scale = Math.exp(delta * k);
+    const nextZoom = Math.min(4, Math.max(0.25, viewport.zoom * scale));
+    const applied = nextZoom / viewport.zoom;
+    // Keep cursor point stable: adjust pan so p maps to same screen position
+    const newPan = {
+      x: p.x - (p.x - viewport.pan.x) * applied,
+      y: p.y - (p.y - viewport.pan.y) * applied,
+    };
+    setZoom(nextZoom);
+    setPan(newPan);
   };
 
   const onPointerDown = (e: React.PointerEvent<SVGSVGElement>) => {
@@ -105,8 +118,8 @@ export function WorkspaceStage() {
     const dyPx = e.clientY - last.y;
     panPointerRef.current = { x: e.clientX, y: e.clientY };
     const mmpp = getMmPerPx();
-    const dxMm = dxPx * mmpp.x;
-    const dyMm = dyPx * mmpp.y;
+    const dxMm = dxPx * mmpp.x * Math.max(0.1, panSpeedMultiplier);
+    const dyMm = dyPx * mmpp.y * Math.max(0.1, panSpeedMultiplier);
     panDeltaRef.current = { x: panDeltaRef.current.x + dxMm, y: panDeltaRef.current.y + dyMm };
     const start = panStartRef.current ?? { x: 0, y: 0 };
     const next = { x: start.x + panDeltaRef.current.x, y: start.y + panDeltaRef.current.y };
@@ -280,9 +293,68 @@ export function WorkspaceStage() {
     updateItemPosition(id, nx, ny);
   };
 
+  useEffect(() => {
+    if (!showPerfHud) return;
+    let raf = 0;
+    const tick = () => {
+      const now = performance.now();
+      fpsRef.current.frames += 1;
+      const dt = now - fpsRef.current.last;
+      if (dt >= 500) {
+        const fpsNow = (fpsRef.current.frames * 1000) / dt;
+        setFps(Math.round(fpsNow));
+        fpsRef.current.frames = 0;
+        fpsRef.current.last = now;
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    fpsRef.current = { last: performance.now(), frames: 0 };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [showPerfHud]);
+
+  useEffect(() => {
+    if (!fitToBoundsRequestId) return;
+    if (!items.length) {
+      setZoom(1);
+      setPan({ x: 0, y: 0 });
+      return;
+    }
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const it of items) {
+      if (it.type === 'rectangle') {
+        const x1 = it.position.x;
+        const y1 = it.position.y;
+        const x2 = it.position.x + it.rect.width;
+        const y2 = it.position.y + it.rect.height;
+        minX = Math.min(minX, x1); minY = Math.min(minY, y1);
+        maxX = Math.max(maxX, x2); maxY = Math.max(maxY, y2);
+      }
+    }
+    if (!Number.isFinite(minX)) {
+      setZoom(1);
+      setPan({ x: 0, y: 0 });
+      return;
+    }
+    // Add small margin (mm)
+    const margin = 2;
+    minX -= margin; minY -= margin; maxX += margin; maxY += margin;
+    const rectW = Math.max(1, maxX - minX);
+    const rectH = Math.max(1, maxY - minY);
+    const scaleX = bounds.width / rectW;
+    const scaleY = bounds.height / rectH;
+    const targetZoom = Math.min(4, Math.max(0.25, Math.min(scaleX, scaleY)));
+    // Center the rect
+    const panX = (bounds.width - rectW * targetZoom) / 2 - minX * targetZoom;
+    const panY = (bounds.height - rectH * targetZoom) / 2 - minY * targetZoom;
+    setZoom(targetZoom);
+    setPan({ x: panX, y: panY });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fitToBoundsRequestId]);
+
   return (
     <Box
-      style={{ width: '100%', height: 420, outline: 'none' }}
+      style={{ width: '100%', height: 420, outline: 'none', position: 'relative' }}
       tabIndex={0}
       onKeyDown={handleKeyDown}
     >
@@ -355,7 +427,7 @@ export function WorkspaceStage() {
                       onClick={() => selectOnly(it.id)}
                     />
                     {sel && (
-                      <g pointerEvents="none">
+                      <g>
                         <rect
                           x={selX}
                           y={selY}
@@ -365,12 +437,22 @@ export function WorkspaceStage() {
                           stroke="#1e90ff"
                           strokeWidth={0.25}
                           vectorEffect="non-scaling-stroke"
+                          pointerEvents="none"
                         />
                         {/* corner dots */}
-                        <circle cx={selX} cy={selY} r={0.5} fill="#1e90ff" />
-                        <circle cx={selX + selW} cy={selY} r={0.5} fill="#1e90ff" />
-                        <circle cx={selX} cy={selY + selH} r={0.5} fill="#1e90ff" />
-                        <circle cx={selX + selW} cy={selY + selH} r={0.5} fill="#1e90ff" />
+                        {([
+                          { x: selX, y: selY, cursor: 'nwse-resize' },
+                          { x: selX + selW, y: selY, cursor: 'nesw-resize' },
+                          { x: selX, y: selY + selH, cursor: 'nesw-resize' },
+                          { x: selX + selW, y: selY + selH, cursor: 'nwse-resize' },
+                        ] as const).map((h, idx) => (
+                          <g key={idx} style={{ cursor: h.cursor }}>
+                            {/* visible dot */}
+                            <circle cx={h.x} cy={h.y} r={0.5} fill="#1e90ff" />
+                            {/* larger invisible hit area for future interactions */}
+                            <circle cx={h.x} cy={h.y} r={2} fill="#1e90ff" fillOpacity={0} strokeOpacity={0} />
+                          </g>
+                        ))}
                       </g>
                     )}
                   </g>
@@ -381,6 +463,15 @@ export function WorkspaceStage() {
           </g>
         </svg>
       </DndContext>
+      {showPerfHud && (
+        <div style={{ position: 'absolute', top: 8, right: 8, background: 'rgba(0,0,0,0.6)', color: '#fff', padding: '6px 8px', borderRadius: 6, fontSize: 12, lineHeight: 1.2 }}>
+          <div>FPS: {fps}</div>
+          <div>Items: {items.length}</div>
+          <div>Sel: {selectedIds.length}</div>
+          <div>Zoom: {viewport.zoom.toFixed(2)}</div>
+          <div>Pan: {viewport.pan.x.toFixed(1)}, {viewport.pan.y.toFixed(1)}</div>
+        </div>
+      )}
     </Box>
   );
 }

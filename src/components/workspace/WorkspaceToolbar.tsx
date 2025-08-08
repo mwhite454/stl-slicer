@@ -23,10 +23,10 @@ export function WorkspaceToolbar() {
     <Group wrap="nowrap" gap="sm" justify="space-between">
       <Group gap="xs">
         <Button
-          variant="filled"
-          onClick={() => addRectangle({ width: 20, height: 10, x: 0, y: 0 })}
+          variant="light"
+          onClick={() => addRectangle({ width: 20, height: 10 })}
         >
-          Add rectangle
+          Add 20x10
         </Button>
         <Button
           variant="light"
@@ -34,8 +34,67 @@ export function WorkspaceToolbar() {
         >
           Add 2000 (stress test)
         </Button>
-        <Button variant="subtle" color="red" onClick={() => clearItems()}>
+        <Button
+          variant="subtle"
+          color="gray"
+          onClick={() => clearItems()}
+        >
           Clear
+        </Button>
+
+        {/* Optional controls */}
+        <NumberInput
+          label="Pan speed"
+          size="sm"
+          min={0.1}
+          max={5}
+          step={0.1}
+          clampBehavior="strict"
+          value={ui.panSpeedMultiplier}
+          onChange={(val) => {
+            const n = typeof val === 'number' ? val : Number(val);
+            if (!Number.isNaN(n)) setUi({ panSpeedMultiplier: Math.min(5, Math.max(0.1, n)) });
+          }}
+          maw={140}
+        />
+
+        <NumberInput
+          label="Zoom speed"
+          size="sm"
+          min={0.1}
+          max={5}
+          step={0.1}
+          clampBehavior="strict"
+          value={ui.zoomSpeedMultiplier}
+          onChange={(val) => {
+            const n = typeof val === 'number' ? val : Number(val);
+            if (!Number.isNaN(n)) setUi({ zoomSpeedMultiplier: Math.min(5, Math.max(0.1, n)) });
+          }}
+          maw={140}
+        />
+
+        <Button
+          variant="default"
+          onClick={() => setUi({ showPerfHud: !ui.showPerfHud })}
+        >
+          {ui.showPerfHud ? 'Hide HUD' : 'Show HUD'}
+        </Button>
+
+        <Button
+          variant="light"
+          onClick={() => {
+            setZoom(1);
+            setPan({ x: 0, y: 0 });
+          }}
+        >
+          Reset view
+        </Button>
+
+        <Button
+          variant="light"
+          onClick={() => setUi({ fitToBoundsRequestId: (ui.fitToBoundsRequestId ?? 0) + 1 })}
+        >
+          Fit to items
         </Button>
       </Group>
 
@@ -133,7 +192,6 @@ export function WorkspaceToolbar() {
           label="Pan X (mm)"
           size="sm"
           step={1}
-          clampBehavior="blur"
           value={pan.x}
           onChange={(val) => {
             const n = typeof val === 'number' ? val : Number(val);
