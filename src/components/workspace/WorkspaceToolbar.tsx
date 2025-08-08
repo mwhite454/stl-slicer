@@ -16,6 +16,8 @@ export function WorkspaceToolbar() {
   const addRectangle = useWorkspaceStore((s) => s.addRectangle);
   const addManyRectangles = useWorkspaceStore((s) => s.addManyRectangles);
   const clearItems = useWorkspaceStore((s) => s.clearItems);
+  const ui = useWorkspaceStore((s) => s.ui);
+  const setUi = useWorkspaceStore((s) => s.setUi);
 
   return (
     <Group wrap="nowrap" gap="sm" justify="space-between">
@@ -95,6 +97,36 @@ export function WorkspaceToolbar() {
             if (!Number.isNaN(n)) setZoom(Math.min(4, Math.max(0.25, n)));
           }}
           maw={120}
+        />
+
+        <NumberInput
+          label="Drag threshold (px)"
+          size="sm"
+          min={0}
+          max={10}
+          step={1}
+          clampBehavior="strict"
+          value={ui.dragActivationDistance}
+          onChange={(val) => {
+            const n = typeof val === 'number' ? val : Number(val);
+            if (!Number.isNaN(n)) setUi({ dragActivationDistance: Math.max(0, Math.min(10, n)) });
+          }}
+          maw={160}
+        />
+
+        <NumberInput
+          label="Select offset (px)"
+          size="sm"
+          min={0}
+          max={8}
+          step={1}
+          clampBehavior="strict"
+          value={ui.selectionOverlayOffsetPx}
+          onChange={(val) => {
+            const n = typeof val === 'number' ? val : Number(val);
+            if (!Number.isNaN(n)) setUi({ selectionOverlayOffsetPx: Math.max(0, Math.min(8, n)) });
+          }}
+          maw={160}
         />
 
         <NumberInput

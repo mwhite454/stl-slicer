@@ -46,4 +46,5 @@ export type WorkspaceState = {
 
 export type UiSettings = {
   dragActivationDistance: number; // px to start drag
+  selectionOverlayOffsetPx: number; // px outward offset for selection rect/dots
 };

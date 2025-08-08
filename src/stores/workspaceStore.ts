@@ -43,6 +43,7 @@ const DEFAULT_VIEWPORT: ViewportState = {
 };
 const DEFAULT_UI: UiSettings = {
   dragActivationDistance: 1,
+  selectionOverlayOffsetPx: 2,
 };
 
 export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({

@@ -19,9 +19,18 @@ export function WorkspaceStage() {
   const selectOnly = useWorkspaceStore((s) => s.selectOnly);
   const updateItemPosition = useWorkspaceStore((s) => s.updateItemPosition);
   const activationDistance = useWorkspaceStore((s) => s.ui.dragActivationDistance);
+  const setZoom = useWorkspaceStore((s) => s.setZoom);
+  const setPan = useWorkspaceStore((s) => s.setPan);
+  const selectionOverlayOffsetPx = useWorkspaceStore((s) => s.ui.selectionOverlayOffsetPx);
 
   const { ref: svgRef } = useElementSize();
   const contentGroupRef = useRef<SVGGElement | null>(null);
+  const [isPanning, setIsPanning] = useState(false);
+  const panPointerRef = useRef<{ x: number; y: number } | null>(null);
+  const panStartRef = useRef<{ x: number; y: number } | null>(null);
+  const panRafRef = useRef<number | null>(null);
+  const panPendingRef = useRef<{ x: number; y: number } | null>(null);
+  const panDeltaRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   // Sensors depend on activation distance from store
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: activationDistance } })
@@ -34,6 +43,107 @@ export function WorkspaceStage() {
   const setPathRef = (id: string, el: SVGPathElement | null) => {
     if (el) pathRefs.current.set(id, el);
     else pathRefs.current.delete(id);
+  };
+
+  // Map client (px) to workspace mm using current group CTM
+  const clientToMm = (clientX: number, clientY: number) => {
+    const svgEl = (svgRef as any)?.current as SVGSVGElement | null;
+    const g = contentGroupRef.current;
+    if (!svgEl || !g) return null;
+    const pt = svgEl.createSVGPoint();
+    pt.x = clientX;
+    pt.y = clientY;
+    const m = g.getScreenCTM();
+    if (!m) return null;
+    const inv = m.inverse();
+    const p = pt.matrixTransform(inv as any);
+    return { x: p.x, y: p.y };
+  };
+
+  const clampZoom = (z: number) => Math.min(4, Math.max(0.25, z));
+
+  const onWheel = (e: React.WheelEvent<SVGSVGElement>) => {
+    // Zoom with mouse wheel when inside grid
+    e.preventDefault();
+    e.stopPropagation();
+    const anchor = clientToMm(e.clientX, e.clientY);
+    if (!anchor) return;
+    // Use exponential scale for smooth zoom; deltaY>0 => zoom out
+    const scale = Math.exp(-e.deltaY * 0.001);
+    const z0 = viewport.zoom;
+    const z1 = clampZoom(z0 * scale);
+    if (z1 === z0) return;
+    // keep anchor position stable: (w + p1)*z1 = (w + p0)*z0
+    const p0 = viewport.pan;
+    const p1x = (z0 / z1) * (anchor.x + p0.x) - anchor.x;
+    const p1y = (z0 / z1) * (anchor.y + p0.y) - anchor.y;
+    setZoom(z1);
+    setPan({ x: p1x, y: p1y });
+  };
+
+  const onPointerDown = (e: React.PointerEvent<SVGSVGElement>) => {
+    if (e.button === 1) {
+      // Middle button panning
+      e.preventDefault();
+      e.stopPropagation();
+      setIsPanning(true);
+      panPointerRef.current = { x: e.clientX, y: e.clientY };
+      // capture starting pan from latest store to avoid stale closures
+      const latestPan = useWorkspaceStore.getState().viewport.pan;
+      panStartRef.current = { x: latestPan.x, y: latestPan.y };
+      panDeltaRef.current = { x: 0, y: 0 };
+      (e.currentTarget as any).setPointerCapture?.(e.pointerId);
+    }
+  };
+
+  const onPointerMove = (e: React.PointerEvent<SVGSVGElement>) => {
+    if (!isPanning || !panPointerRef.current) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const last = panPointerRef.current;
+    const dxPx = e.clientX - last.x;
+    const dyPx = e.clientY - last.y;
+    panPointerRef.current = { x: e.clientX, y: e.clientY };
+    const mmpp = getMmPerPx();
+    const dxMm = dxPx * mmpp.x;
+    const dyMm = dyPx * mmpp.y;
+    panDeltaRef.current = { x: panDeltaRef.current.x + dxMm, y: panDeltaRef.current.y + dyMm };
+    const start = panStartRef.current ?? { x: 0, y: 0 };
+    const next = { x: start.x + panDeltaRef.current.x, y: start.y + panDeltaRef.current.y };
+    panPendingRef.current = next;
+    if (panRafRef.current == null) {
+      panRafRef.current = requestAnimationFrame(() => {
+        panRafRef.current = null;
+        const pending = panPendingRef.current;
+        if (!pending) return;
+        // Imperatively update transform for smoothness
+        const g = contentGroupRef.current;
+        if (g) {
+          g.setAttribute('transform', `translate(${pending.x} ${pending.y}) scale(${viewport.zoom})`);
+        }
+      });
+    }
+  };
+
+  const onPointerUp = (e: React.PointerEvent<SVGSVGElement>) => {
+    if (isPanning && e.button === 1) {
+      e.preventDefault();
+      e.stopPropagation();
+      setIsPanning(false);
+      panPointerRef.current = null;
+      const start = panStartRef.current ?? viewport.pan;
+      const finalPan = panPendingRef.current ?? { x: start.x + panDeltaRef.current.x, y: start.y + panDeltaRef.current.y };
+      // Commit to store
+      setPan({ x: finalPan.x, y: finalPan.y });
+      panStartRef.current = null;
+      panPendingRef.current = null;
+      panDeltaRef.current = { x: 0, y: 0 };
+      if (panRafRef.current != null) {
+        cancelAnimationFrame(panRafRef.current);
+        panRafRef.current = null;
+      }
+      (e.currentTarget as any).releasePointerCapture?.(e.pointerId);
+    }
   };
   const dragPendingRef = useRef<{ x: number; y: number } | null>(null);
   const rafIdRef = useRef<number | null>(null);
@@ -182,9 +292,13 @@ export function WorkspaceStage() {
           width="100%"
           height="100%"
           viewBox={`0 0 ${bounds.width} ${bounds.height}`}
-          style={{ background: '#fff', border: '1px solid #e5e5e5', borderRadius: 8, userSelect: 'none', touchAction: 'none', outline: 'none' }}
+          style={{ background: '#fff', border: '1px solid #e5e5e5', borderRadius: 8, userSelect: 'none', touchAction: 'none', outline: 'none', cursor: isPanning ? 'grabbing' : undefined }}
           className="workspace-svg"
           onClick={() => selectOnly(null)}
+          onWheel={onWheel}
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
         >
           <defs>
             <style>{`
@@ -222,6 +336,14 @@ export function WorkspaceStage() {
                 const d = rectPathData(it.rect.width, it.rect.height);
                 const posX = activeId === it.id && dragPosMm ? dragPosMm.x : it.position.x;
                 const posY = activeId === it.id && dragPosMm ? dragPosMm.y : it.position.y;
+                // Expand selection overlay by a few screen pixels converted to mm for visibility
+                const mmpp = getMmPerPx();
+                const ox = selectionOverlayOffsetPx * mmpp.x;
+                const oy = selectionOverlayOffsetPx * mmpp.y;
+                const selX = posX - ox;
+                const selY = posY - oy;
+                const selW = it.rect.width + ox * 2;
+                const selH = it.rect.height + oy * 2;
                 return (
                   <g key={it.id}>
                     <DraggablePath
@@ -235,20 +357,20 @@ export function WorkspaceStage() {
                     {sel && (
                       <g pointerEvents="none">
                         <rect
-                          x={posX}
-                          y={posY}
-                          width={it.rect.width}
-                          height={it.rect.height}
+                          x={selX}
+                          y={selY}
+                          width={selW}
+                          height={selH}
                           fill="none"
                           stroke="#1e90ff"
                           strokeWidth={0.25}
                           vectorEffect="non-scaling-stroke"
                         />
                         {/* corner dots */}
-                        <circle cx={posX} cy={posY} r={0.5} fill="#1e90ff" />
-                        <circle cx={posX + it.rect.width} cy={posY} r={0.5} fill="#1e90ff" />
-                        <circle cx={posX} cy={posY + it.rect.height} r={0.5} fill="#1e90ff" />
-                        <circle cx={posX + it.rect.width} cy={posY + it.rect.height} r={0.5} fill="#1e90ff" />
+                        <circle cx={selX} cy={selY} r={0.5} fill="#1e90ff" />
+                        <circle cx={selX + selW} cy={selY} r={0.5} fill="#1e90ff" />
+                        <circle cx={selX} cy={selY + selH} r={0.5} fill="#1e90ff" />
+                        <circle cx={selX + selW} cy={selY + selH} r={0.5} fill="#1e90ff" />
                       </g>
                     )}
                   </g>
