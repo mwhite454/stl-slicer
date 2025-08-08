@@ -1,0 +1,97 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["driverAdapters"]
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+  // This will be ignored when using the Turso adapter
+}
+
+model User {
+  id        String    @id
+  email     String    @unique
+  name      String?
+  createdAt String
+  updatedAt String
+
+  accounts  UserAccount[]
+  sessions  UserSession[]
+  configs   UserConfig[]
+  projects  UserProject[]
+}
+
+model UserAccount {
+  id                String   @id
+  userId            String
+  providerId        String
+  providerType      String
+  providerAccountId String
+  refreshToken      String?
+  accessToken       String?
+  expiresAt         Int?
+  tokenType         String?
+  scope             String?
+  idToken           String?
+  createdAt         String
+  updatedAt         String
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model UserSession {
+  id            String   @id
+  userId        String
+  sessionToken  String   @unique
+  expires       String
+  createdAt     String
+  updatedAt     String
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model UserConfig {
+  id               String   @id
+  userId           String
+  configName       String   @default("default")
+  laserCutterWidth Float    @default(300.0)
+  laserCutterHeight Float   @default(200.0)
+  kerf             Float    @default(0.1)
+  layerHeight      Float    @default(3.0)
+  defaultAxis      String   @default("z")
+  materialThickness Float   @default(3.0)
+  cutSpeed         Float    @default(10.0)
+  cutPower         Float    @default(80.0)
+  partSpacing      Float    @default(2.0)
+  margin           Float    @default(5.0)
+  optimizeLayout   Boolean  @default(true)
+  theme            String   @default("light")
+  units            String   @default("mm")
+  autoSave         Boolean  @default(true)
+  showKerfPreview  Boolean  @default(true)
+  customSettings   String   @default("{}")
+  createdAt        String
+  updatedAt        String
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, configName])
+}
+
+model UserProject {
+  id                  String  @id
+  userId              String
+  projectName         String
+  description         String?
+  stlFileName         String?
+  sliceSettings       String?
+  previewImage        String?
+  fileSize            Int?
+  estimatedPrintTime  Int?
+  materialUsage       Float?
+  createdAt           String
+  updatedAt           String
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
