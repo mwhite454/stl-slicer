@@ -30,11 +30,12 @@ export type WorkspaceActions = {
   // grid/bounds
   setGrid: (grid: Partial<GridSettings>) => void;
   setBounds: (bounds: Bounds) => void;
+  setBedSize: (bounds: Bounds) => void; // convenience to update both ui.bedSizeMm and bounds
 };
 
 export type WorkspaceStore = WorkspaceState & WorkspaceActions;
 
-const DEFAULT_BOUNDS: Bounds = { width: 200, height: 200 }; // mm
+const DEFAULT_BOUNDS: Bounds = { width: 482, height: 279 }; // mm
 const DEFAULT_GRID: GridSettings = { size: 5, snap: false, show: true };
 const DEFAULT_VIEWPORT: ViewportState = {
   zoom: 1,
@@ -47,12 +48,13 @@ const DEFAULT_UI: UiSettings = {
   panSpeedMultiplier: 1,
   zoomSpeedMultiplier: 1,
   nudgeDistanceMm: 1,
+  bedSizeMm: DEFAULT_BOUNDS,
   showPerfHud: false,
   fitToBoundsRequestId: 0,
 };
 
 export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
-  bounds: DEFAULT_BOUNDS,
+  bounds: DEFAULT_UI.bedSizeMm,
   grid: DEFAULT_GRID,
   viewport: DEFAULT_VIEWPORT,
   ui: DEFAULT_UI,
@@ -124,5 +126,6 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
   setUi: (ui) => set((state) => ({ ui: { ...state.ui, ...ui } })),
 
   setGrid: (grid) => set((state) => ({ grid: { ...state.grid, ...grid } })),
-  setBounds: (bounds) => set(() => ({ bounds })),
+  setBounds: (bounds) => set((state) => ({ bounds, ui: { ...state.ui, bedSizeMm: bounds } })),
+  setBedSize: (bounds) => set((state) => ({ ui: { ...state.ui, bedSizeMm: bounds }, bounds })),
 }));

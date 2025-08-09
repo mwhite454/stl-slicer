@@ -50,6 +50,7 @@ export type UiSettings = {
   panSpeedMultiplier: number; // scales panning delta (>= 0.1)
   zoomSpeedMultiplier: number; // scales wheel zoom speed (>= 0.1)
   nudgeDistanceMm: number; // keyboard nudge distance in mm when not snapping
+  bedSizeMm: Bounds; // user-configurable workspace bed size in mm
   showPerfHud: boolean; // toggle for FPS/render HUD
   fitToBoundsRequestId: number; // increment to request fit-to-bounds from toolbar
 };

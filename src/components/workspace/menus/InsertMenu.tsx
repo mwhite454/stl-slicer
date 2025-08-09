@@ -8,7 +8,7 @@ export function InsertMenu() {
   const addManyRectangles = useWorkspaceStore((s) => s.addManyRectangles);
 
   return (
-    <Menu withinPortal>
+    <Menu withinPortal closeOnItemClick={false}>
       <Menu.Target>
         <Button variant="light">Insert</Button>
       </Menu.Target>

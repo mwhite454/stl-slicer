@@ -8,7 +8,7 @@ export function EditMenu() {
   const clearItems = useWorkspaceStore((s) => s.clearItems);
 
   return (
-    <Menu withinPortal>
+    <Menu withinPortal closeOnItemClick={false}>
       <Menu.Target>
         <Button variant="light" color="gray">Edit</Button>
       </Menu.Target>

@@ -13,9 +13,11 @@ export function ViewMenu() {
   const setPan = useWorkspaceStore((s) => s.setPan);
   const setUnits = useWorkspaceStore((s) => s.setUnits);
   const setUi = useWorkspaceStore((s) => s.setUi);
+  const bed = useWorkspaceStore((s) => s.ui.bedSizeMm);
+  const setBedSize = useWorkspaceStore((s) => s.setBedSize);
 
   return (
-    <Menu withinPortal>
+    <Menu withinPortal closeOnItemClick={false}>
       <Menu.Target>
         <Button variant="light">View</Button>
       </Menu.Target>
@@ -45,6 +47,38 @@ export function ViewMenu() {
             ]}
             size="sm"
           />
+        </Menu.Item>
+
+        <Menu.Divider />
+
+        <Menu.Label>Bed size (mm)</Menu.Label>
+        <Menu.Item>
+          <Group gap="sm">
+            <NumberInput
+              label="Width"
+              size="sm"
+              min={10}
+              step={1}
+              value={bed.width}
+              onChange={(val) => {
+                const n = typeof val === 'number' ? val : Number(val);
+                if (!Number.isNaN(n)) setBedSize({ width: Math.max(1, n), height: bed.height });
+              }}
+              maw={140}
+            />
+            <NumberInput
+              label="Height"
+              size="sm"
+              min={10}
+              step={1}
+              value={bed.height}
+              onChange={(val) => {
+                const n = typeof val === 'number' ? val : Number(val);
+                if (!Number.isNaN(n)) setBedSize({ width: bed.width, height: Math.max(1, n) });
+              }}
+              maw={140}
+            />
+          </Group>
         </Menu.Item>
 
         <Menu.Divider />

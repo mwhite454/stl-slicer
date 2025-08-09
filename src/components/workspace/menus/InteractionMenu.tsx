@@ -9,7 +9,7 @@ export function InteractionMenu() {
   const setUi = useWorkspaceStore((s) => s.setUi);
 
   return (
-    <Menu withinPortal>
+    <Menu withinPortal closeOnItemClick={false}>
       <Menu.Target>
         <Button variant="light">Interaction</Button>
       </Menu.Target>

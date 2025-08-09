@@ -9,7 +9,7 @@ export function GridMenu() {
   const setGrid = useWorkspaceStore((s) => s.setGrid);
 
   return (
-    <Menu withinPortal>
+    <Menu withinPortal closeOnItemClick={false}>
       <Menu.Target>
         <Button variant="light">Grid</Button>
       </Menu.Target>
