@@ -49,6 +49,7 @@ export type UiSettings = {
   selectionOverlayOffsetPx: number; // px outward offset for selection rect/dots
   panSpeedMultiplier: number; // scales panning delta (>= 0.1)
   zoomSpeedMultiplier: number; // scales wheel zoom speed (>= 0.1)
+  nudgeDistanceMm: number; // keyboard nudge distance in mm when not snapping
   showPerfHud: boolean; // toggle for FPS/render HUD
   fitToBoundsRequestId: number; // increment to request fit-to-bounds from toolbar
 };

@@ -1,12 +1,15 @@
 "use client";
 
-import React, { useMemo, useRef, useState, useEffect, memo } from 'react';
+import React, { useMemo, useRef, useState, useEffect } from 'react';
 import { Box } from '@mantine/core';
 import { useElementSize } from '@mantine/hooks';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { rectPathData } from '@/lib/maker/generateSvgPath';
 import { transformForMakerPath } from '@/lib/coords';
-import { DndContext, DragEndEvent, DragMoveEvent, DragStartEvent, PointerSensor, useDraggable, useSensor, useSensors } from '@dnd-kit/core';
+import { DndContext, DragEndEvent, DragMoveEvent, DragStartEvent, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
+ import { WorkspaceSvg } from '@/components/workspace/WorkspaceSvg';
+import { DraggablePath } from './DraggablePath';
+import { MAX_ZOOM, MIN_ZOOM, WHEEL_ZOOM_SENSITIVITY, GRID_LINE_STROKE, MIN_POSITION_MM, DIRECTION_KEY_MAP, NUDGE_MIN_MM, FIT_MARGIN_MM, BORDER_STROKE, MIN_SPEED_MULT } from './workspaceConstants';
 
 type DragOrigin = { id: string; x0: number; y0: number } | null;
 
@@ -26,6 +29,7 @@ export function WorkspaceStage() {
   const zoomSpeedMultiplier = useWorkspaceStore((s) => s.ui.zoomSpeedMultiplier);
   const showPerfHud = useWorkspaceStore((s) => s.ui.showPerfHud);
   const fitToBoundsRequestId = useWorkspaceStore((s) => s.ui.fitToBoundsRequestId);
+  const nudgeDistanceMm = useWorkspaceStore((s) => s.ui.nudgeDistanceMm);
 
   const { ref: svgRef } = useElementSize();
   const contentGroupRef = useRef<SVGGElement | null>(null);
@@ -66,8 +70,6 @@ export function WorkspaceStage() {
     return { x: p.x, y: p.y };
   };
 
-  const clampZoom = (z: number) => Math.min(4, Math.max(0.25, z));
-
   const onWheel = (e: React.WheelEvent<SVGSVGElement>) => {
     // Zoom anchored at cursor
     e.preventDefault();
@@ -80,10 +82,9 @@ export function WorkspaceStage() {
     const ctm = g.getScreenCTM();
     if (!ctm) return;
     const p = pt.matrixTransform(ctm.inverse());
-    const delta = -e.deltaY * Math.max(0.1, zoomSpeedMultiplier); // natural: scroll up to zoom in
-    const k = 0.0015; // sensitivity base
-    const scale = Math.exp(delta * k);
-    const nextZoom = Math.min(4, Math.max(0.25, viewport.zoom * scale));
+    const delta = -e.deltaY * Math.max(MIN_SPEED_MULT, zoomSpeedMultiplier); // natural: scroll up to zoom in
+    const scale = Math.exp(delta * WHEEL_ZOOM_SENSITIVITY);
+    const nextZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, viewport.zoom * scale));
     const applied = nextZoom / viewport.zoom;
     // Keep cursor point stable: adjust pan so p maps to same screen position
     const newPan = {
@@ -118,8 +119,8 @@ export function WorkspaceStage() {
     const dyPx = e.clientY - last.y;
     panPointerRef.current = { x: e.clientX, y: e.clientY };
     const mmpp = getMmPerPx();
-    const dxMm = dxPx * mmpp.x * Math.max(0.1, panSpeedMultiplier);
-    const dyMm = dyPx * mmpp.y * Math.max(0.1, panSpeedMultiplier);
+    const dxMm = dxPx * mmpp.x * Math.max(MIN_SPEED_MULT, panSpeedMultiplier);
+    const dyMm = dyPx * mmpp.y * Math.max(MIN_SPEED_MULT, panSpeedMultiplier);
     panDeltaRef.current = { x: panDeltaRef.current.x + dxMm, y: panDeltaRef.current.y + dyMm };
     const start = panStartRef.current ?? { x: 0, y: 0 };
     const next = { x: start.x + panDeltaRef.current.x, y: start.y + panDeltaRef.current.y };
@@ -183,8 +184,8 @@ export function WorkspaceStage() {
           y1={0}
           x2={x}
           y2={bounds.height}
-          stroke="#e0e0e0"
-          strokeWidth={0.2}
+          stroke={GRID_LINE_STROKE.color}
+          strokeWidth={GRID_LINE_STROKE.width}
         />
       );
     }
@@ -197,8 +198,8 @@ export function WorkspaceStage() {
           y1={y}
           x2={bounds.width}
           y2={y}
-          stroke="#e0e0e0"
-          strokeWidth={0.2}
+          stroke={GRID_LINE_STROKE.color}
+          strokeWidth={GRID_LINE_STROKE.width}
         />
       );
     }
@@ -229,8 +230,8 @@ export function WorkspaceStage() {
     let nx = x0 + dxMm;
     let ny = y0 + dyMm;
     // Clamp within bounds (ensuring item stays fully inside)
-    nx = Math.max(0, Math.min(bounds.width - item.rect.width, nx));
-    ny = Math.max(0, Math.min(bounds.height - item.rect.height, ny));
+    nx = Math.max(MIN_POSITION_MM, Math.min(bounds.width - item.rect.width, nx));
+    ny = Math.max(MIN_POSITION_MM, Math.min(bounds.height - item.rect.height, ny));
     if (grid.snap && grid.size > 0) {
       nx = Math.round(nx / grid.size) * grid.size;
       ny = Math.round(ny / grid.size) * grid.size;
@@ -270,17 +271,14 @@ export function WorkspaceStage() {
     // Nudge selected item(s) with arrow keys
     const id = selectedIds[0];
     if (!id) return;
-    let dx = 0;
-    let dy = 0;
-    if (e.key === 'ArrowLeft') dx = -1;
-    else if (e.key === 'ArrowRight') dx = 1;
-    else if (e.key === 'ArrowUp') dy = -1;
-    else if (e.key === 'ArrowDown') dy = 1;
-    else return;
+    const dir = DIRECTION_KEY_MAP[e.key];
+    if (!dir) return;
+    const { dx, dy } = dir;
     e.preventDefault();
     const item = items.find((it) => it.id === id);
     if (!item) return;
-    const step = e.shiftKey && grid.size > 0 ? grid.size : 1;
+    // Use grid size when holding Shift, otherwise configurable nudge distance in mm
+    const step = e.shiftKey && grid.size > 0 ? grid.size : Math.max(NUDGE_MIN_MM, nudgeDistanceMm);
     let nx = item.position.x + dx * step;
     let ny = item.position.y + dy * step;
     // optional snapping when shift used is already applied by step; if grid.snap, snap final
@@ -337,13 +335,13 @@ export function WorkspaceStage() {
       return;
     }
     // Add small margin (mm)
-    const margin = 2;
+    const margin = FIT_MARGIN_MM;
     minX -= margin; minY -= margin; maxX += margin; maxY += margin;
     const rectW = Math.max(1, maxX - minX);
     const rectH = Math.max(1, maxY - minY);
     const scaleX = bounds.width / rectW;
     const scaleY = bounds.height / rectH;
-    const targetZoom = Math.min(4, Math.max(0.25, Math.min(scaleX, scaleY)));
+    const targetZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.min(scaleX, scaleY)));
     // Center the rect
     const panX = (bounds.width - rectW * targetZoom) / 2 - minX * targetZoom;
     const panY = (bounds.height - rectH * targetZoom) / 2 - minY * targetZoom;
@@ -354,37 +352,22 @@ export function WorkspaceStage() {
 
   return (
     <Box
-      style={{ width: '100%', height: 420, outline: 'none', position: 'relative' }}
+      style={{ width: '100%', height: '100%', outline: 'none', position: 'relative' }}
       tabIndex={0}
       onKeyDown={handleKeyDown}
     >
       <DndContext sensors={sensors} onDragStart={onDragStart} onDragMove={onDragMove} onDragEnd={onDragEnd}>
-        <svg
+        <WorkspaceSvg
           ref={svgRef as any}
-          width="100%"
-          height="100%"
-          viewBox={`0 0 ${bounds.width} ${bounds.height}`}
-          style={{ background: '#fff', border: '1px solid #e5e5e5', borderRadius: 8, userSelect: 'none', touchAction: 'none', outline: 'none', cursor: isPanning ? 'grabbing' : undefined }}
-          className="workspace-svg"
-          onClick={() => selectOnly(null)}
+          bounds={bounds}
+          isPanning={isPanning}
+          onClearSelection={() => selectOnly(null)}
           onWheel={onWheel}
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
         >
-          <defs>
-            <style>{`
-              .workspace-svg:focus { outline: none !important; }
-              .workspace-svg *:focus { outline: none !important; }
-              .workspace-svg *:focus-visible { outline: none !important; }
-              .workspace-svg [aria-selected],
-              .workspace-svg [aria-pressed],
-              .workspace-svg [aria-roledescription],
-              .workspace-svg [role] {
-                outline: none !important;
-              }
-            `}</style>
-          </defs>
+          
           {/* Pan/Zoom group in mm */}
           <g ref={contentGroupRef} transform={`translate(${viewport.pan.x} ${viewport.pan.y}) scale(${viewport.zoom})`}>
             {/* Grid */}
@@ -397,8 +380,8 @@ export function WorkspaceStage() {
               width={bounds.width}
               height={bounds.height}
               fill="none"
-              stroke="#bbb"
-              strokeWidth={0.4}
+              stroke={BORDER_STROKE.color}
+              strokeWidth={BORDER_STROKE.width}
             />
 
             {/* Items */}
@@ -461,7 +444,7 @@ export function WorkspaceStage() {
               return null;
             })}
           </g>
-        </svg>
+        </WorkspaceSvg>
       </DndContext>
       {showPerfHud && (
         <div style={{ position: 'absolute', top: 8, right: 8, background: 'rgba(0,0,0,0.6)', color: '#fff', padding: '6px 8px', borderRadius: 6, fontSize: 12, lineHeight: 1.2 }}>
@@ -476,56 +459,4 @@ export function WorkspaceStage() {
   );
 }
 
-type DraggablePathProps = {
-  id: string;
-  d: string;
-  transform: string;
-  selected: boolean;
-  onClick: () => void;
-  setPathRef: (id: string, el: SVGPathElement | null) => void;
-};
 
-const DraggablePath = memo(function DraggablePath({ id, d, transform, selected, onClick, setPathRef }: DraggablePathProps) {
-  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id });
-  const groupRef = setNodeRef as unknown as (node: SVGGElement | null) => void;
-  return (
-    <g
-      ref={groupRef}
-      {...listeners}
-      role={undefined as any}
-      tabIndex={-1}
-      focusable={false as any}
-      pointerEvents="all"
-      style={{ cursor: isDragging ? 'grabbing' : 'grab', touchAction: 'none', outline: 'none', WebkitTapHighlightColor: 'transparent' as any, caretColor: 'transparent' as any }}
-      onMouseDown={(e) => {
-        // prevent focus ring/outline on click
-        e.preventDefault();
-      }}
-      onFocus={(e) => {
-        // force blur to avoid UA/mantine focus styling on SVG nodes
-        (e.currentTarget as any)?.blur?.();
-      }}
-      onClick={(e) => {
-        e.stopPropagation();
-        onClick();
-      }}
-    >
-      <path
-        ref={(el) => setPathRef(id, el)}
-        focusable={false as any}
-        d={d}
-        transform={transform}
-        fill="transparent"
-        stroke="#222"
-        strokeWidth={0.4}
-        vectorEffect="non-scaling-stroke"
-        opacity={isDragging ? 0.9 : 1}
-        pointerEvents="all"
-        style={{ outline: 'none' }}
-        onFocus={(e) => {
-          (e.currentTarget as any)?.blur?.();
-        }}
-      />
-    </g>
-  );
-});

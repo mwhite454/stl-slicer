@@ -46,6 +46,7 @@ const DEFAULT_UI: UiSettings = {
   selectionOverlayOffsetPx: 2,
   panSpeedMultiplier: 1,
   zoomSpeedMultiplier: 1,
+  nudgeDistanceMm: 1,
   showPerfHud: false,
   fitToBoundsRequestId: 0,
 };
