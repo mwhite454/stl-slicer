@@ -8,7 +8,9 @@ import type {
   ViewportState,
   Units,
   UiSettings,
+  SliceLayerParams
 } from '@/types/workspace';
+import type { MakerJSModel } from '@/lib/coords';
 
 export type WorkspaceActions = {
   // items
@@ -17,6 +19,31 @@ export type WorkspaceActions = {
   updateItemPosition: (id: string, x: number, y: number) => void;
   deleteItem: (id: string) => void;
   clearItems: () => void;
+
+  // slice layer actions
+  addSliceLayer: (params: {
+    makerJsModel: MakerJSModel;
+    layerIndex: number;
+    zCoordinate: number;
+    axis: 'x' | 'y' | 'z';
+    layerThickness: number;
+    x?: number;
+    y?: number;
+    z?: number;
+  }) => void;
+  
+  addMultipleSliceLayers: (layers: Array<{
+    makerJsModel: MakerJSModel;
+    layerIndex: number;
+    zCoordinate: number;
+    axis: 'x' | 'y' | 'z';
+    layerThickness: number;
+    x?: number;
+    y?: number;
+    z?: number;
+  }>) => void;
+  
+  updateSliceLayer: (id: string, updates: Partial<SliceLayerParams>) => void;
 
   // selection
   selectOnly: (id: string | null) => void;
@@ -30,11 +57,12 @@ export type WorkspaceActions = {
   // grid/bounds
   setGrid: (grid: Partial<GridSettings>) => void;
   setBounds: (bounds: Bounds) => void;
+  setBedSize: (bounds: Bounds) => void; // convenience to update both ui.bedSizeMm and bounds
 };
 
 export type WorkspaceStore = WorkspaceState & WorkspaceActions;
 
-const DEFAULT_BOUNDS: Bounds = { width: 200, height: 200 }; // mm
+const DEFAULT_BOUNDS: Bounds = { width: 482, height: 279 }; // mm
 const DEFAULT_GRID: GridSettings = { size: 5, snap: false, show: true };
 const DEFAULT_VIEWPORT: ViewportState = {
   zoom: 1,
@@ -46,12 +74,14 @@ const DEFAULT_UI: UiSettings = {
   selectionOverlayOffsetPx: 2,
   panSpeedMultiplier: 1,
   zoomSpeedMultiplier: 1,
+  nudgeDistanceMm: 1,
+  bedSizeMm: DEFAULT_BOUNDS,
   showPerfHud: false,
   fitToBoundsRequestId: 0,
 };
 
 export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
-  bounds: DEFAULT_BOUNDS,
+  bounds: DEFAULT_UI.bedSizeMm,
   grid: DEFAULT_GRID,
   viewport: DEFAULT_VIEWPORT,
   ui: DEFAULT_UI,
@@ -63,7 +93,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
       const item: WorkspaceItem = {
         id: nanoid(),
         type: 'rectangle',
-        position: { x, y },
+        position: { x, y, z: 0 },
         zIndex: state.items.length,
         rect: { width, height },
       };
@@ -123,5 +153,73 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
   setUi: (ui) => set((state) => ({ ui: { ...state.ui, ...ui } })),
 
   setGrid: (grid) => set((state) => ({ grid: { ...state.grid, ...grid } })),
-  setBounds: (bounds) => set(() => ({ bounds })),
+  setBounds: (bounds) => set((state) => ({ bounds, ui: { ...state.ui, bedSizeMm: bounds } })),
+  setBedSize: (bounds) => set((state) => ({ ui: { ...state.ui, bedSizeMm: bounds }, bounds })),
+  
+  // Slice layer actions
+  addSliceLayer: ({ 
+    makerJsModel, 
+    layerIndex, 
+    zCoordinate, 
+    axis, 
+    layerThickness,
+    x = 0, 
+    y = 0,
+    z = zCoordinate
+  }) =>
+    set((state) => {
+      const item: WorkspaceItem = {
+        id: nanoid(),
+        type: 'sliceLayer',
+        position: { x, y, z },
+        zIndex: state.items.length,
+        layer: {
+          makerJsModel,
+          layerIndex,
+          zCoordinate,
+          axis,
+          layerThickness
+        }
+      };
+      return { items: [...state.items, item] };
+    }),
+    
+  addMultipleSliceLayers: (layers) =>
+    set((state) => {
+      const items: WorkspaceItem[] = [...state.items];
+      layers.forEach((layerData, index) => {
+        const item: WorkspaceItem = {
+          id: nanoid(),
+          type: 'sliceLayer',
+          position: { 
+            x: layerData.x || 0, 
+            y: layerData.y || 0, 
+            z: layerData.z || layerData.zCoordinate 
+          },
+          zIndex: items.length + index,
+          layer: {
+            makerJsModel: layerData.makerJsModel,
+            layerIndex: layerData.layerIndex,
+            zCoordinate: layerData.zCoordinate,
+            axis: layerData.axis,
+            layerThickness: layerData.layerThickness
+          }
+        };
+        items.push(item);
+      });
+      return { items };
+    }),
+    
+  updateSliceLayer: (id, updates) =>
+    set((state) => ({
+      items: state.items.map((item) => {
+        if (item.id === id && item.type === 'sliceLayer') {
+          return {
+            ...item,
+            layer: { ...item.layer, ...updates }
+          };
+        }
+        return item;
+      })
+    }))
 }));

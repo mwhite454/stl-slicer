@@ -1,20 +1,20 @@
 import React from 'react';
-import { Axis } from '../../utils/StlSlicer';
-import { Button } from './button';
-import { Card } from './card';
-import { Slider } from './slider';
-import { 
-  Box, 
-  Stack, 
-  Title, 
-  Text, 
-  FileInput, 
-  Radio, 
-  Group, 
+import { Axis } from '../utils/StlSlicer';
+import {
+  Box,
+  Stack,
+  Title,
+  Text,
+  FileInput,
+  Radio,
+  Group,
   NumberInput,
   Divider,
   ScrollArea,
-  Grid
+  Grid,
+  Button,
+  Card,
+  Slider,
 } from '@mantine/core';
 
 interface SidebarProps {
@@ -56,7 +56,7 @@ export function Sidebar({
     setModelRotation({ x: value, y: yRotation, z: zRotation });
   };
   const onYRotation = (value: number) => {
-    setYRotation(value);  
+    setYRotation(value);
     setModelRotation({ x: xRotation, y: value, z: zRotation });
   };
   const onZRotation = (value: number) => {
@@ -71,9 +71,9 @@ export function Sidebar({
             <Title order={2} size="xl" fw={700}>STL Slicer</Title>
             <Text size="sm" c="dimmed">Upload and slice STL files</Text>
           </Stack>
-          
+
           <Divider />
-          
+
           {/* File Input */}
           <Stack gap="xs">
             <Text size="sm" fw={500}>STL File</Text>
@@ -91,7 +91,7 @@ export function Sidebar({
             />
             {file && <Text size="sm" c="dimmed">Selected: {file.name}</Text>}
           </Stack>
-          
+
           {/* Dimensions Display */}
           {dimensions && (
             <Card>
@@ -112,7 +112,7 @@ export function Sidebar({
               </Stack>
             </Card>
           )}
-          
+
           {/* Axis Selection */}
           <Stack gap="xs">
             <Text size="sm" fw={500}>Slicing Axis</Text>
@@ -124,7 +124,7 @@ export function Sidebar({
               </Group>
             </Radio.Group>
           </Stack>
-          
+
           {/* Rotation of model */}
           <Stack gap="xs">
             <Text size="sm" fw={500}>Model Rotation</Text>
@@ -161,7 +161,7 @@ export function Sidebar({
               </Box>
             </Stack>
           </Stack>
-          
+
           {/* Layer Thickness */}
           <Stack gap="xs">
             <Group justify="space-between">
@@ -187,7 +187,7 @@ export function Sidebar({
               <Text size="xs" c="dimmed">mm</Text>
             </Group>
           </Stack>
-          
+
           {/* Action Buttons */}
           <Stack gap="sm">
             <Button
@@ -201,21 +201,21 @@ export function Sidebar({
           </Stack>
         </Stack>
       </ScrollArea>
-      
+
       {/* View Toggle */}
       <Box style={{ borderTop: '1px solid #e9ecef', padding: '1rem' }}>
         <Stack gap="xs">
           <Text size="sm" fw={500}>View Mode</Text>
           <Group grow>
-            <Button 
-              variant={viewMode === '3d' ? 'default' : 'outline'}
+            <Button
+              variant={viewMode === '3d' ? 'filled' : 'outline'}
               size="sm"
               onClick={() => onViewModeChange('3d')}
             >
               3D View
             </Button>
             <Button
-              variant={viewMode === '2d' ? 'default' : 'outline'}
+              variant={viewMode === '2d' ? 'filled' : 'outline'}
               size="sm"
               onClick={() => onViewModeChange('2d')}
             >
@@ -226,4 +226,4 @@ export function Sidebar({
       </Box>
     </Box>
   );
-} 
+}

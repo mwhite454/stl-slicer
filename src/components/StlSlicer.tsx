@@ -3,15 +3,16 @@
 import { useCallback, useEffect, useState, useRef } from 'react';
 import { StlSlicer as StlSlicerUtil, Axis, LayerData } from '../utils/StlSlicer';
 import { exportSvgZip } from '../utils/exportUtils';
+import { useWorkspaceStore } from '../stores/workspaceStore';
+import type { MakerJSModel } from '../lib/coords';
 import * as THREE from 'three';
 import { Euler } from 'three'; // Added Euler import
 import dynamic from 'next/dynamic';
-import { Sidebar } from './ui/Sidebar';
-import { Button } from './ui/button';
+import { Sidebar } from './Sidebar';
 import {  useSVGStore } from '@/stores/svgStore';
 import { useViewerStore } from '@/stores/viewerStore';   
 import { useSTLStore } from '@/stores/stlStore';
-import { Box, Flex, Text, Alert, Group, Stack, Title, ActionIcon, Loader, Slider } from '@mantine/core';
+import { Box, Flex, Text, Alert, Group, Stack, Title, ActionIcon, Loader, Slider, Button } from '@mantine/core';
 
 // Improved dynamic import to avoid chunk loading errors
 const StlViewer3D = dynamic(
@@ -183,6 +184,36 @@ function StlSlicerContent() {
         const midIdx = getMiddleNonEmptyLayerIndex(slicedLayers);
         setPreviewLayerIndex(midIdx);
         localStorage.setItem('slicerPreviewLayerIndex', String(midIdx));
+        
+        // NEW: Export sliced layers to workspace store
+        // Generate maker.js models for all layers
+        const makerJsModels = slicerRef.current!.generateMakerJSModels(slicedLayers);
+        
+        // Get the workspace store actions
+        const workspaceStore = useWorkspaceStore.getState();
+        
+        // Clear any existing slice layers from workspace
+        const currentItems = workspaceStore.items;
+        const sliceLayerIds = currentItems
+          .filter(item => item.type === 'sliceLayer')
+          .map(item => item.id);
+        
+        sliceLayerIds.forEach(id => workspaceStore.deleteItem(id));
+        
+        // Add all sliced layers to workspace
+        const layersToAdd = slicedLayers.map((layer, index) => ({
+          makerJsModel: makerJsModels[index],
+          layerIndex: layer.index,
+          zCoordinate: layer.z,
+          axis,
+          layerThickness,
+          // Position in real-world coordinates
+          x: 0, // Will need to determine proper positioning
+          y: 0, // Will need to determine proper positioning
+          z: layer.z
+        }));
+        
+        workspaceStore.addMultipleSliceLayers(layersToAdd);
 
       } catch (err) {
         if (!cancelled) {
@@ -561,7 +592,8 @@ function StlSlicerContent() {
         <Group justify="flex-end" mb="md">
           <Button
             onClick={handleClearSession}
-            variant="destructive"
+            variant="filled"
+            color="red"
             size="sm"
             title="Clear session and remove last STL file from storage"
           >
@@ -640,7 +672,7 @@ function StlSlicerContent() {
                           size="sm"
                           title="Zoom Out"
                         >
-                          <span className="text-lg">−</span>
+                          −
                         </Button>
                         <Button
                           onClick={handleZoomReset}
@@ -648,7 +680,7 @@ function StlSlicerContent() {
                           size="sm"
                           title="Reset Zoom"
                         >
-                          <span className="text-xs">Reset</span>
+                          Reset
                         </Button>
                         <Button
                           onClick={handleFitToView}
@@ -656,7 +688,7 @@ function StlSlicerContent() {
                           size="sm"
                           title="Fit to View"
                         >
-                          <span className="text-xs">Fit</span>
+                          Fit
                         </Button>
                         <Button
                           onClick={() => handleZoomChange('in')}
@@ -664,7 +696,7 @@ function StlSlicerContent() {
                           size="sm"
                           title="Zoom In"
                         >
-                          <span className="text-lg">+</span>
+                          +
                         </Button>
                         <Text size="xs" c="dimmed" ml="sm">
                           {Math.round(zoomLevel * 100)}%

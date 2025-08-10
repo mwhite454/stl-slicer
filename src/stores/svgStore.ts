@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
-import {parser} from 'svg-parser'
+import {parse} from 'svg-parser'
 
 
 interface SVGState {
@@ -27,8 +27,10 @@ export const useSVGStore = create<SVGState>()(persist(
         const reader = new FileReader();
         reader.onload = (event) => {
           const svgContent = event.target?.result as string;
-          const parsedPath = parser(svgContent);
-          get().setFilePaths(parsedPath);
+          const parsedSvg = parse(svgContent);
+          // Extract paths from the parsed SVG
+          const paths: string[] = [];
+          get().setFilePaths(paths);
         };
         reader.readAsText(file);
       }

@@ -22,14 +22,36 @@ export type RectangleParams = {
   height: number; // mm
 };
 
-export type WorkspaceItem = {
-  id: string;
-  type: 'rectangle';
-  position: { x: number; y: number }; // mm top-left
-  zIndex: number;
-  locked?: boolean;
-  rect: RectangleParams;
+import type { MakerJSModel } from '@/lib/coords';
+
+export type SliceLayerParams = {
+  makerJsModel: MakerJSModel; // The maker.js model data
+  layerIndex: number;         // Index of the layer in the slice stack
+  zCoordinate: number;        // Real-world Z coordinate of the layer
+  axis: 'x' | 'y' | 'z';      // Axis along which the slice was made
+  layerThickness: number;     // Thickness of each layer in mm
 };
+
+export type WorkspaceItem = 
+  | {
+      id: string;
+      type: 'rectangle';
+      position: { x: number; y: number; z?: number }; // mm top-left (z optional for 2D items)
+      zIndex: number;
+      locked?: boolean;
+      rect: RectangleParams;
+    }
+  | {
+      id: string;
+      type: 'sliceLayer';
+      position: { x: number; y: number; z?: number }; // Real-world coordinates (z optional for consistency)
+      zIndex: number;
+      locked?: boolean;
+      layer: SliceLayerParams;
+    };
+
+
+
 
 export type SelectionState = {
   selectedIds: string[];
@@ -49,6 +71,8 @@ export type UiSettings = {
   selectionOverlayOffsetPx: number; // px outward offset for selection rect/dots
   panSpeedMultiplier: number; // scales panning delta (>= 0.1)
   zoomSpeedMultiplier: number; // scales wheel zoom speed (>= 0.1)
+  nudgeDistanceMm: number; // keyboard nudge distance in mm when not snapping
+  bedSizeMm: Bounds; // user-configurable workspace bed size in mm
   showPerfHud: boolean; // toggle for FPS/render HUD
   fitToBoundsRequestId: number; // increment to request fit-to-bounds from toolbar
 };
