@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from "react";
 import JSZip from "jszip";
 import { ReactSVGPanZoom, Tool, Value } from "react-svg-pan-zoom";
-import { parseSvgPaths, svgPathToPolygons, createOffsetPath, polygonsToSvgPath } from "./datahelpers";
+import { parseSvgPaths, svgPathToPolygons, polygonsToSvgPath } from "./datahelpers";
 import { Container, Title, Stack, Group, NumberInput, Select, FileInput, Button, Text } from "@mantine/core";
 
 const SvgCombinerPage = () => {
@@ -130,9 +130,8 @@ const SvgCombinerPage = () => {
     const svgPages = await combineAndOptimizeSVGs(files);
     const parsedPaths = parseSvgPaths(svgPages);
     const polygons = svgPathToPolygons(parsedPaths);
-    const offsetPolygons = createOffsetPath(polygons, perimeterOffset); // Offset by 10 units
-    const svgOffsetPath = polygonsToSvgPath(offsetPolygons);
-    svgPages.push(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${canvasWidth} ${canvasHeight}"><path d="${svgOffsetPath}" fill="none" stroke="purple" /></svg>`);
+    const svgPath = polygonsToSvgPath(polygons);
+    svgPages.push(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${canvasWidth} ${canvasHeight}"><path d="${svgPath}" fill="none" stroke="purple" /></svg>`);
 
     // get first file name to use as base for zip
     const lastFile = files[files.length - 1].name.replace(/\.[^/.]+$/, ""); // Remove file extension
@@ -206,14 +205,16 @@ const SvgCombinerPage = () => {
         />
         {combinedSvgContent && (
           <>
-            <Button
-              component="a"
-              href={combinedSvgUrl}
-              download={`combined_${folderName}_svgs.zip`} 
-              mt="md"
-            >
-              Download Combined SVGs (ZIP)
-            </Button>
+            {combinedSvgUrl && (
+              <Button
+                component="a"
+                href={combinedSvgUrl}
+                download={`combined_${folderName}_svgs.zip`} 
+                mt="md"
+              >
+                Download Combined SVGs (ZIP)
+              </Button>
+            )}
             <Stack w="100%" mt="xl">
               <Text size="lg" fw={500} mb="sm">Preview Pages:</Text>
               <Group mb="md">

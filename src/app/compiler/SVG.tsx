@@ -1,6 +1,6 @@
 import { Box } from '@mantine/core';
 
-export const SVG = ({svgContent, width, height, unit="mm", zoom=1}) => {
+export const SVG = ({svgContent, width, height, unit="mm", zoom=1}: {svgContent: string, width: number, height: number, unit?: string, zoom?: number}) => {
   return (
     <Box style={{ width: '100%', height: '100%', overflow: 'auto' }}>
       <svg

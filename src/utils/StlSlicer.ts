@@ -2,8 +2,6 @@ import * as THREE from 'three';
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
 import { categorizePaths, textToSvgPath } from './pathHelpers'
 // @ts-ignore
-import {ClipperLib} from "../utils/clipper";
-// @ts-ignore
 import * as makerjs from 'makerjs';
 
 // Type declarations for maker.js since no official types exist
@@ -746,35 +744,13 @@ export class StlSlicer {
     paths.forEach((path, index) => {
       const isExternal = categories[index] === "external";
       if(isExternal){
-        try {
-          // Convert THREE.Vector2 path to ClipperLib format
-          const clipperPath = path.map(point => ({
-            X: Math.round(point.x * 1000), // Scale up for precision
-            Y: Math.round(point.y * 1000)
-          }));
-          
-          // Use ClipperOffset instead of Clipper.Offset
-          const co = new ClipperLib.ClipperOffset();
-          co.AddPath(clipperPath, ClipperLib.JoinType.jtRound, ClipperLib.EndType.etClosedPolygon);
-          
-          const offsetPaths = new ClipperLib.Paths();
-          co.Execute(offsetPaths, 500); // 0.5mm offset scaled by 1000
-          
-          // ClipperLib.Paths is an array-like object, cast to any[] for proper handling
-          const offsetPathsArray = offsetPaths as any[];
-          if (offsetPathsArray.length > 0 && offsetPathsArray[0].length > 0) {
-            // Convert back to regular coordinates and create SVG path
-            const offsetPathData = offsetPathsArray[0].map((point: any, pointIndex: number) => 
-              `${pointIndex === 0 ? 'M' : 'L'}${(point.X / 1000).toFixed(3)},${(point.Y / 1000).toFixed(3)}`
-            ).join(' ') + 'Z';
-            
-            svg += `\n<path d="${offsetPathData}" fill="none" id="layer-${layer.index}-perimeter" stroke="purple" stroke-width="0.3" />\n`;
-            pathCount++;
-          }
-        } catch (offsetError) {
-          console.warn(`[StlSlicer] Failed to create offset path for layer ${layer.index}, path ${index}:`, offsetError);
-          // Continue without the offset path
-        }
+        // External path handling
+        const pathData = path.map((point, pointIndex) => 
+          `${pointIndex === 0 ? 'M' : 'L'}${point.x.toFixed(3)},${point.y.toFixed(3)}`
+        ).join(' ') + 'Z';
+        
+        svg += `\n<path d="${pathData}" fill="none" id="layer-${layer.index}-external" stroke="blue" stroke-width="0.3" />\n`;
+        pathCount++;
       }
 
       const pathColor = categories[index] === "external" ? "red" : "black"

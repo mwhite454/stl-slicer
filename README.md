@@ -26,8 +26,10 @@ A web application that loads STL files, slices them into layers, and exports the
 - **Next.js**: React framework for the application
 - **TypeScript**: For type-safe code
 - **Three.js**: For 3D geometry processing and visualization
+- **Mantine**: UI components and styling
+- **Zustand**: State management
+- **Maker.js**: 2D modeling for layers and SVG export
 - **JSZip**: For creating ZIP archives with multiple SVG files
-- **Tailwind CSS**: For styling the UI
 
 ## Getting Started
 
@@ -48,7 +50,7 @@ A web application that loads STL files, slices them into layers, and exports the
 2. The 3D model will be displayed in the viewer (you can rotate, pan, and zoom using the mouse)
 3. Select the slicing axis (X, Y, or Z)
 4. Adjust the layer thickness using the slider or input field
-5. Click "Slice Model" to process the 3D model
+5. The slice preview updates automatically as you adjust settings (no manual "Slice" step)
 6. Toggle between 3D and 2D views to visualize the slices
 7. Use the layer navigation controls to browse through the slices
 8. Click "Export SVG Layers" to download all layers as SVG files in a ZIP archive
@@ -64,6 +66,18 @@ The application uses Three.js to parse and process STL files. The slicing algori
 5. Converting these intersections into 2D paths
 6. Rendering the paths on a canvas for 2D preview and showing slice planes in the 3D view
 7. Generating SVG files with the path data for export
+
+## Migration Notes (2025-08)
+
+- **UI Framework**: Migrated from Tailwind CSS + Radix/shadcn to **Mantine** components.
+- **Removed Files**: Deleted `src/components/ui/` and `src/lib/utils.ts` (Tailwind/clx utilities).
+- **Removed Packages**: `@radix-ui/*`, `@shadcn/ui`, `shadcn`, `class-variance-authority`, `tailwind-merge`, `clsx`, `lucide-react`.
+- **Build Config**: Removed `postcss.config.js`; no Tailwind/PostCSS pipeline is used.
+- **Buttons/Variants**: Replaced shadcn `destructive` with Mantine `variant="filled"` + `color="red"` where appropriate.
+- **Slicing UX**: Slice preview updates automatically when settings change; the explicit "Slice Model" button was removed.
+- **State Management**: Using **Zustand** for app state. Sliced layers are exported to the workspace store as **Maker.js** models with metadata.
+- **Coordinates**: Maker.js is Y-up while SVG is Y-down; conversions are centralized in a `coords` utility for consistency.
+- **Status**: TypeScript build is clean after migration (no Tailwind/Radix references).
 
 ## License
 

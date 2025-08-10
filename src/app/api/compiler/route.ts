@@ -40,7 +40,7 @@ export const POST = async (req: NextRequest) => {
     console.error("Error uploading files:", error);
     return NextResponse.json({
       success: false,
-      message: error.message,
+      message: (error as Error).message || "Unknown error occurred",
     });
   }
 };

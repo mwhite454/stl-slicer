@@ -1,5 +1,4 @@
 import * as svgPathParser from 'svg-path-parser';
-import {ClipperLib} from "../../utils/clipper";
 
 export function parseSvgPaths(svgArray: string[]) {
     const paths: any[] = [];
@@ -42,15 +41,6 @@ export function svgPathToPolygons(parsedPaths: any[], scaleFactor = 1000) {
     return polygons;
 }
 
-// Moved types and interfaces from compiler page
-export interface IntPointType {
-  X: number;
-  Y: number;
-}
-
-export type Polygon = IntPointType[];
-export type Polygons = Polygon[];
-
 export interface PolygonsToSvgPathPoint {
   X: number;
   Y: number;
@@ -58,53 +48,21 @@ export interface PolygonsToSvgPathPoint {
 
 export type PolygonsToSvgPathPolygon = PolygonsToSvgPathPoint[];
 
-// This function unions all polygons into one, then offsets the result by offsetDistance.
-// The result is a single perimeter polygon that overlaps all input polygons by at least offsetDistance.
-export function createOffsetPath(
-  polygons: Polygons,
-  offsetDistance: number,
-  scaleFactor: number = 1000
-): Polygons {
-  if (!polygons.length) return [];
-
-  // Union all polygons into a single shape
-  const clipper = new ClipperLib.Clipper();
-  const solution: Polygons = [];
-  clipper.AddPaths(polygons, ClipperLib.PolyType.ptSubject, true);
-  clipper.Execute(
-    ClipperLib.ClipType.ctUnion,
-    solution,
-    ClipperLib.PolyFillType.pftNonZero,
-    ClipperLib.PolyFillType.pftNonZero
-  );
-
-  // Simplify the unioned shape to remove overlaps
-  const simplifiedSolution = ClipperLib.Clipper.SimplifyPolygons(solution, ClipperLib.PolyFillType.pftNonZero);
-
-  // Offset the unioned shape outward by offsetDistance
-  const offsetter = new ClipperLib.ClipperOffset();
-  offsetter.AddPaths(simplifiedSolution, ClipperLib.JoinType.jtRound, ClipperLib.EndType.etClosedPolygon);
-  const offsetSolution: Polygons = [];
-  offsetter.Execute(offsetSolution, offsetDistance * scaleFactor);
-
-  // Apply additional offset passes to ensure minimum width
-  const expandedOffsetter = new ClipperLib.ClipperOffset();
-  expandedOffsetter.AddPaths(offsetSolution, ClipperLib.JoinType.jtRound, ClipperLib.EndType.etClosedPolygon);
-  const expandedSolution: Polygons = [];
-  expandedOffsetter.Execute(expandedSolution, offsetDistance * scaleFactor * 2);
-
-  return ClipperLib.Clipper.SimplifyPolygons(expandedSolution, ClipperLib.PolyFillType.pftNonZero);
-}
-
 export function polygonsToSvgPath(
   polygons: PolygonsToSvgPathPolygon[],
   scaleFactor: number = 1000
 ): string {
-  return polygons
-    .map((polygon: PolygonsToSvgPathPolygon) => {
-      return polygon
-        .map((point: PolygonsToSvgPathPoint) => `${point.X / scaleFactor},${point.Y / scaleFactor}`)
-        .join(' L ');
-    })
-    .join(' ');
+  if (!polygons.length) return "";
+
+  return polygons.map(polygon => {
+    if (!polygon.length) return "";
+    
+    const pathData = polygon.map((point, index) => {
+      const x = (point.X / scaleFactor).toFixed(3);
+      const y = (point.Y / scaleFactor).toFixed(3);
+      return index === 0 ? `M${x},${y}` : `L${x},${y}`;
+    }).join(' ') + 'Z';
+    
+    return pathData;
+  }).join(' ');
 }

@@ -7,8 +7,11 @@ import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { rectPathData } from '@/lib/maker/generateSvgPath';
 import { transformForMakerPath } from '@/lib/coords';
 import { DndContext, DragEndEvent, DragMoveEvent, DragStartEvent, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
- import { WorkspaceSvg } from '@/components/workspace/WorkspaceSvg';
+import { WorkspaceSvg } from '@/components/workspace/WorkspaceSvg';
 import { DraggablePath } from './DraggablePath';
+import { SelectionWrapper } from './SelectionWrapper';
+import { WorkspaceBorder } from './WorkspaceBorder';
+import { WorkspacePerfHud } from './WorkspacePerfHud';
 import { MAX_ZOOM, MIN_ZOOM, WHEEL_ZOOM_SENSITIVITY, GRID_LINE_STROKE, MIN_POSITION_MM, DIRECTION_KEY_MAP, NUDGE_MIN_MM, FIT_MARGIN_MM, BORDER_STROKE, MIN_SPEED_MULT } from './workspaceConstants';
 
 type DragOrigin = { id: string; x0: number; y0: number } | null;
@@ -230,8 +233,10 @@ export function WorkspaceStage() {
     let nx = x0 + dxMm;
     let ny = y0 + dyMm;
     // Clamp within bounds (ensuring item stays fully inside)
-    nx = Math.max(MIN_POSITION_MM, Math.min(bounds.width - item.rect.width, nx));
-    ny = Math.max(MIN_POSITION_MM, Math.min(bounds.height - item.rect.height, ny));
+    const itemWidth = item.type === 'rectangle' ? item.rect.width : 100; // Placeholder width for sliceLayer
+    const itemHeight = item.type === 'rectangle' ? item.rect.height : 100; // Placeholder height for sliceLayer
+    nx = Math.max(MIN_POSITION_MM, Math.min(bounds.width - itemWidth, nx));
+    ny = Math.max(MIN_POSITION_MM, Math.min(bounds.height - itemHeight, ny));
     if (grid.snap && grid.size > 0) {
       nx = Math.round(nx / grid.size) * grid.size;
       ny = Math.round(ny / grid.size) * grid.size;
@@ -245,7 +250,8 @@ export function WorkspaceStage() {
         if (!pending || !activeId) return;
         const el = pathRefs.current.get(activeId);
         if (el) {
-          el.setAttribute('transform', transformForMakerPath(pending.x, pending.y, item.rect.height));
+          const itemHeight = item.type === 'rectangle' ? item.rect.height : 100; // Placeholder height for sliceLayer 
+          el.setAttribute('transform', transformForMakerPath(pending.x, pending.y, itemHeight));
         }
       });
     }
@@ -286,8 +292,10 @@ export function WorkspaceStage() {
       nx = Math.round(nx / grid.size) * grid.size;
       ny = Math.round(ny / grid.size) * grid.size;
     }
-    nx = Math.max(0, Math.min(bounds.width - item.rect.width, nx));
-    ny = Math.max(0, Math.min(bounds.height - item.rect.height, ny));
+    const itemWidth = item.type === 'rectangle' ? item.rect.width : 100; // Placeholder width for sliceLayer
+    const itemHeight = item.type === 'rectangle' ? item.rect.height : 100; // Placeholder height for sliceLayer
+    nx = Math.max(0, Math.min(bounds.width - itemWidth, nx));
+    ny = Math.max(0, Math.min(bounds.height - itemHeight, ny));
     updateItemPosition(id, nx, ny);
   };
 
@@ -374,15 +382,7 @@ export function WorkspaceStage() {
             {gridLines}
 
             {/* Workspace border in content space */}
-            <rect
-              x={0}
-              y={0}
-              width={bounds.width}
-              height={bounds.height}
-              fill="none"
-              stroke={BORDER_STROKE.color}
-              strokeWidth={BORDER_STROKE.width}
-            />
+            <WorkspaceBorder width={bounds.width} height={bounds.height} />
 
             {/* Items */}
             {items.map((it) => {
@@ -410,34 +410,30 @@ export function WorkspaceStage() {
                       onClick={() => selectOnly(it.id)}
                     />
                     {sel && (
-                      <g>
-                        <rect
-                          x={selX}
-                          y={selY}
-                          width={selW}
-                          height={selH}
-                          fill="none"
-                          stroke="#1e90ff"
-                          strokeWidth={0.25}
-                          vectorEffect="non-scaling-stroke"
-                          pointerEvents="none"
-                        />
-                        {/* corner dots */}
-                        {([
-                          { x: selX, y: selY, cursor: 'nwse-resize' },
-                          { x: selX + selW, y: selY, cursor: 'nesw-resize' },
-                          { x: selX, y: selY + selH, cursor: 'nesw-resize' },
-                          { x: selX + selW, y: selY + selH, cursor: 'nwse-resize' },
-                        ] as const).map((h, idx) => (
-                          <g key={idx} style={{ cursor: h.cursor }}>
-                            {/* visible dot */}
-                            <circle cx={h.x} cy={h.y} r={0.5} fill="#1e90ff" />
-                            {/* larger invisible hit area for future interactions */}
-                            <circle cx={h.x} cy={h.y} r={2} fill="#1e90ff" fillOpacity={0} strokeOpacity={0} />
-                          </g>
-                        ))}
-                      </g>
+                      <SelectionWrapper x={selX} y={selY} width={selW} height={selH} />
                     )}
+                  </g>
+                );
+              } else if (it.type === 'sliceLayer') {
+                // For sliceLayer items, we'll need to convert the maker.js model to SVG paths
+                // This is a placeholder implementation - we'll need to implement the actual conversion
+                const posX = activeId === it.id && dragPosMm ? dragPosMm.x : it.position.x;
+                const posY = activeId === it.id && dragPosMm ? dragPosMm.y : it.position.y;
+                // TODO: Convert maker.js model to SVG paths
+                // For now, we'll just render a placeholder rectangle
+                const width = 100; // Placeholder width
+                const height = 100; // Placeholder height
+                const d = rectPathData(width, height);
+                return (
+                  <g key={it.id}>
+                    <DraggablePath
+                      id={it.id}
+                      d={d}
+                      transform={transformForMakerPath(posX, posY, height)}
+                      selected={sel}
+                      setPathRef={setPathRef}
+                      onClick={() => selectOnly(it.id)}
+                    />
                   </g>
                 );
               }
@@ -447,13 +443,13 @@ export function WorkspaceStage() {
         </WorkspaceSvg>
       </DndContext>
       {showPerfHud && (
-        <div style={{ position: 'absolute', top: 8, right: 8, background: 'rgba(0,0,0,0.6)', color: '#fff', padding: '6px 8px', borderRadius: 6, fontSize: 12, lineHeight: 1.2 }}>
-          <div>FPS: {fps}</div>
-          <div>Items: {items.length}</div>
-          <div>Sel: {selectedIds.length}</div>
-          <div>Zoom: {viewport.zoom.toFixed(2)}</div>
-          <div>Pan: {viewport.pan.x.toFixed(1)}, {viewport.pan.y.toFixed(1)}</div>
-        </div>
+        <WorkspacePerfHud
+          fps={fps}
+          itemsCount={items.length}
+          selectedCount={selectedIds.length}
+          zoom={viewport.zoom}
+          pan={viewport.pan}
+        />
       )}
     </Box>
   );

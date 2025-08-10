@@ -22,14 +22,36 @@ export type RectangleParams = {
   height: number; // mm
 };
 
-export type WorkspaceItem = {
-  id: string;
-  type: 'rectangle';
-  position: { x: number; y: number }; // mm top-left
-  zIndex: number;
-  locked?: boolean;
-  rect: RectangleParams;
+import type { MakerJSModel } from '@/lib/coords';
+
+export type SliceLayerParams = {
+  makerJsModel: MakerJSModel; // The maker.js model data
+  layerIndex: number;         // Index of the layer in the slice stack
+  zCoordinate: number;        // Real-world Z coordinate of the layer
+  axis: 'x' | 'y' | 'z';      // Axis along which the slice was made
+  layerThickness: number;     // Thickness of each layer in mm
 };
+
+export type WorkspaceItem = 
+  | {
+      id: string;
+      type: 'rectangle';
+      position: { x: number; y: number; z?: number }; // mm top-left (z optional for 2D items)
+      zIndex: number;
+      locked?: boolean;
+      rect: RectangleParams;
+    }
+  | {
+      id: string;
+      type: 'sliceLayer';
+      position: { x: number; y: number; z?: number }; // Real-world coordinates (z optional for consistency)
+      zIndex: number;
+      locked?: boolean;
+      layer: SliceLayerParams;
+    };
+
+
+
 
 export type SelectionState = {
   selectedIds: string[];
