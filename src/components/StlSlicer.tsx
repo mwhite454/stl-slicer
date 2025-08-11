@@ -12,22 +12,10 @@ import { Sidebar } from './Sidebar';
 import {  useSVGStore } from '@/stores/svgStore';
 import { useViewerStore } from '@/stores/viewerStore';   
 import { useSTLStore } from '@/stores/stlStore';
-import { Box, Flex, Text, Alert, Group, Stack, Title, ActionIcon, Loader, Slider, Button } from '@mantine/core';
-
-// Improved dynamic import to avoid chunk loading errors
-const StlViewer3D = dynamic(
-  () => import('./StlViewer3D').then(mod => mod.default), 
-  {
-    loading: () => (
-      <Box w="100%" h={400} style={{ border: '1px solid #e9ecef', borderRadius: '8px', backgroundColor: '#f8f9fa', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <Stack align="center" gap="sm">
-          <Loader size="md" />
-          <Text size="sm">Loading 3D Viewer...</Text>
-        </Stack>
-      </Box>
-    ),
-  }
-);
+import { Box, Flex, Text, Alert, Stack, Loader } from '@mantine/core';
+import { ViewModePanel } from './slicer/ViewModePanel';
+import { LayerNavigator } from './slicer/LayerNavigator';
+import { ClearSessionButton } from './slicer/ClearSessionButton';
 
 // Convert File to base64
 const fileToBase64 = (file: File): Promise<string> =>
@@ -589,17 +577,7 @@ function StlSlicerContent() {
       {/* Main Content */}
       <Box style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: '1.5rem' }}>
         {/* Clear Session Button */}
-        <Group justify="flex-end" mb="md">
-          <Button
-            onClick={handleClearSession}
-            variant="filled"
-            color="red"
-            size="sm"
-            title="Clear session and remove last STL file from storage"
-          >
-            Clear Session
-          </Button>
-        </Group>
+        <ClearSessionButton onClear={handleClearSession} />
         
         {/* Error Display */}
         {error && (
@@ -611,155 +589,30 @@ function StlSlicerContent() {
         {/* 3D or 2D View based on selected mode */}
         <Box style={{ flex: 1, overflow: 'hidden' }}>
           {file && (
-            <>
-              {viewMode === '3d' ? (
-                <>
-                  <Box 
-                    style={{ 
-                      position: 'relative', 
-                      width: '100%', 
-                      height: '100%',
-                      zIndex: 10, 
-                      minHeight: '400px',
-                      pointerEvents: 'auto'
-                    }}
-                  >
-                    <StlViewer3D
-                      stlFile={file}
-                      layers={layers}
-                      axis={axis}
-                      layerThickness={layerThickness}
-                      activeLayerIndex={previewLayerIndex}
-                    />
-                    
-                    {/* Move the instructions to the top right corner */}
-                    <Box 
-                      style={{ 
-                        position: 'absolute',
-                        top: '0.5rem',
-                        right: '0.5rem',
-                        padding: '0.5rem',
-                        backgroundColor: '#e7f5ff',
-                        borderRadius: '0.375rem',
-                        fontSize: '0.875rem',
-                        boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1)',
-                        border: '1px solid #74c0fc',
-                        maxWidth: '250px',
-                        opacity: 0.85,
-                        zIndex: 20
-                      }}
-                    >
-                      <Text size="xs" fw={500}>3D Controls:</Text>
-                      <Box component="ul" style={{ listStyleType: 'disc', paddingLeft: '1rem', marginTop: '0.25rem' }}>
-                        <li>Drag to rotate</li>
-                        <li>Scroll to zoom</li>
-                        <li>Shift+drag to pan</li>
-                      </Box>
-                    </Box>
-                  </Box>
-                </>
-              ) : (
-                layers.length > 0 && (
-                  <Box style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
-                    <Group justify="space-between" align="center" mb="sm">
-                      <Text fw={500}>
-                        2D Layer Preview: {previewLayerIndex + 1} / {layers.length}
-                      </Text>
-                      <Group gap="xs">
-                        <Button
-                          onClick={() => handleZoomChange('out')}
-                          variant="outline"
-                          size="sm"
-                          title="Zoom Out"
-                        >
-                          −
-                        </Button>
-                        <Button
-                          onClick={handleZoomReset}
-                          variant="outline"
-                          size="sm"
-                          title="Reset Zoom"
-                        >
-                          Reset
-                        </Button>
-                        <Button
-                          onClick={handleFitToView}
-                          variant="outline"
-                          size="sm"
-                          title="Fit to View"
-                        >
-                          Fit
-                        </Button>
-                        <Button
-                          onClick={() => handleZoomChange('in')}
-                          variant="outline"
-                          size="sm"
-                          title="Zoom In"
-                        >
-                          +
-                        </Button>
-                        <Text size="xs" c="dimmed" ml="sm">
-                          {Math.round(zoomLevel * 100)}%
-                        </Text>
-                      </Group>
-                    </Group>
-                    <Box style={{ flex: 1, position: 'relative', overflow: 'hidden', minHeight: '400px', width: '100%', height: '100%' }}>
-                      <canvas
-                        ref={canvasRef}
-                        style={{ 
-                          width: '100%', 
-                          height: '100%', 
-                          border: '1px solid #dee2e6', 
-                          borderRadius: '0.375rem', 
-                          backgroundColor: 'white',
-                          display: 'block',
-                          position: 'absolute',
-                          top: 0,
-                          left: 0
-                        }}
-                      />
-                    </Box>
-                  </Box>
-                )
-              )}
-            </>
+            <ViewModePanel
+              file={file}
+              viewMode={viewMode}
+              layers={layers}
+              axis={axis}
+              layerThickness={layerThickness}
+              previewLayerIndex={previewLayerIndex}
+              zoomLevel={zoomLevel}
+              onZoomIn={() => handleZoomChange('in')}
+              onZoomOut={() => handleZoomChange('out')}
+              onZoomReset={handleZoomReset}
+              onFitToView={handleFitToView}
+              canvasRef={canvasRef}
+            />
           )}
         </Box>
         
         {/* Layer Navigation - Positioned below the canvas */}
         {layers.length > 0 && (
-          <Box mt="md" pt="md" style={{ borderTop: '1px solid #dee2e6' }}>
-            <Text fw={500} mb="sm">
-              Navigate Layers: {previewLayerIndex + 1} / {layers.length}
-            </Text>
-            <Group gap="md" align="center" mb="md">
-              <Button
-                onClick={() => setPreviewLayerIndex(Math.max(0, previewLayerIndex - 1))}
-                disabled={previewLayerIndex === 0}
-                variant="outline"
-                size="sm"
-              >
-                Previous
-              </Button>
-              
-              <Slider
-                min={0}
-                max={layers.length - 1}
-                value={previewLayerIndex}
-                onChange={setPreviewLayerIndex}
-                style={{ flex: 1 }}
-              />
-              
-              <Button
-                onClick={() => setPreviewLayerIndex(Math.min(layers.length - 1, previewLayerIndex + 1))}
-                disabled={previewLayerIndex === layers.length - 1}
-                variant="outline"
-                size="sm"
-              >
-                Next
-              </Button>
-            </Group>
-          </Box>
+          <LayerNavigator
+            layers={layers}
+            previewLayerIndex={previewLayerIndex}
+            onChange={setPreviewLayerIndex}
+          />
         )}
       </Box>
     </Flex>
