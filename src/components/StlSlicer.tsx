@@ -16,6 +16,7 @@ import { Box, Flex, Text, Alert, Stack, Loader } from '@mantine/core';
 import { ViewModePanel } from './slicer/ViewModePanel';
 import { LayerNavigator } from './slicer/LayerNavigator';
 import { ClearSessionButton } from './slicer/ClearSessionButton';
+import { buildSliceLayerMetadata } from '@/slicing/metadata';
 
 // Convert File to base64
 const fileToBase64 = (file: File): Promise<string> =>
@@ -188,18 +189,26 @@ function StlSlicerContent() {
         
         sliceLayerIds.forEach(id => workspaceStore.deleteItem(id));
         
-        // Add all sliced layers to workspace
-        const layersToAdd = slicedLayers.map((layer, index) => ({
-          makerJsModel: makerJsModels[index],
-          layerIndex: layer.index,
-          zCoordinate: layer.z,
-          axis,
-          layerThickness,
-          // Position in real-world coordinates
-          x: 0, // Will need to determine proper positioning
-          y: 0, // Will need to determine proper positioning
-          z: layer.z
-        }));
+        // Add all sliced layers to workspace with plane/axis metadata
+        const layersToAdd = slicedLayers.map((layer, index) => {
+          const makerJsModel = makerJsModels[index];
+          const meta = buildSliceLayerMetadata(axis, makerJsModel);
+          return {
+            makerJsModel,
+            layerIndex: layer.index,
+            zCoordinate: layer.z,
+            axis,
+            layerThickness,
+            plane: meta.plane,
+            axisMap: meta.axisMap,
+            vUpSign: meta.vUpSign,
+            uvExtents: meta.uvExtents,
+            // Position in real-world coordinates
+            x: 0,
+            y: 0,
+            z: layer.z,
+          };
+        });
         
         workspaceStore.addMultipleSliceLayers(layersToAdd);
 
@@ -596,12 +605,6 @@ function StlSlicerContent() {
               axis={axis}
               layerThickness={layerThickness}
               previewLayerIndex={previewLayerIndex}
-              zoomLevel={zoomLevel}
-              onZoomIn={() => handleZoomChange('in')}
-              onZoomOut={() => handleZoomChange('out')}
-              onZoomReset={handleZoomReset}
-              onFitToView={handleFitToView}
-              canvasRef={canvasRef}
             />
           )}
         </Box>

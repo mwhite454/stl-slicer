@@ -1,9 +1,11 @@
 "use client";
 
-import { Box, Group, Button, Text, Stack, Loader } from "@mantine/core";
+import { Box, Group, Text, Stack, Loader } from "@mantine/core";
 import dynamic from "next/dynamic";
 import React from "react";
 import type { Axis, LayerData } from "../../utils/StlSlicer";
+import { DesignWorkspace } from "../workspace/DesignWorkspace";
+import { useWorkspaceStore } from "@/stores/workspaceStore";
 
 const StlViewer3D = dynamic(() => import("../StlViewer3D").then((m) => m.default), {
   ssr: false,
@@ -24,12 +26,6 @@ export interface ViewModePanelProps {
   axis: Axis;
   layerThickness: number;
   previewLayerIndex: number;
-  zoomLevel: number;
-  onZoomIn: () => void;
-  onZoomOut: () => void;
-  onZoomReset: () => void;
-  onFitToView: () => void;
-  canvasRef: React.RefObject<HTMLCanvasElement | null>;
 }
 
 export function ViewModePanel({
@@ -39,13 +35,37 @@ export function ViewModePanel({
   axis,
   layerThickness,
   previewLayerIndex,
-  zoomLevel,
-  onZoomIn,
-  onZoomOut,
-  onZoomReset,
-  onFitToView,
-  canvasRef,
 }: ViewModePanelProps) {
+  // Workspace selection + fit handling when in 2D mode
+  const selectOnly = useWorkspaceStore((s) => s.selectOnly);
+  const items = useWorkspaceStore((s) => s.items);
+  const ui = useWorkspaceStore((s) => s.ui);
+  const setUi = useWorkspaceStore((s) => s.setUi);
+
+  // When switching to 2D, fit items once
+  const prevViewRef = React.useRef(viewMode);
+  React.useEffect(() => {
+    if (prevViewRef.current !== viewMode && viewMode === "2d") {
+      setUi({ fitToBoundsRequestId: (ui.fitToBoundsRequestId ?? 0) + 1 });
+    }
+    prevViewRef.current = viewMode;
+  }, [viewMode, setUi, ui.fitToBoundsRequestId]);
+
+  // Keep selection in sync with preview layer when in 2D
+  React.useEffect(() => {
+    if (viewMode !== "2d") return;
+    const match = items.find(
+      (it) => it.type === "sliceLayer" && it.layer.layerIndex === previewLayerIndex
+    );
+    if (match) selectOnly(match.id);
+  }, [viewMode, items, previewLayerIndex, selectOnly]);
+
+  // Only render the active preview layer in 2D view
+  const visibleItemIds = React.useMemo(() => {
+    if (viewMode !== "2d") return [] as string[];
+    const match = items.find((it) => it.type === "sliceLayer" && it.layer.layerIndex === previewLayerIndex);
+    return match ? [match.id] : [];
+  }, [viewMode, items, previewLayerIndex]);
   return (
     <Box style={{ flex: 1, overflow: "hidden" }}>
       {file && (
@@ -100,39 +120,9 @@ export function ViewModePanel({
               <Box style={{ width: "100%", height: "100%", display: "flex", flexDirection: "column" }}>
                 <Group justify="space-between" align="center" mb="sm">
                   <Text fw={500}>2D Layer Preview: {previewLayerIndex + 1} / {layers.length}</Text>
-                  <Group gap="xs">
-                    <Button onClick={onZoomOut} variant="outline" size="sm" title="Zoom Out">
-                      −
-                    </Button>
-                    <Button onClick={onZoomReset} variant="outline" size="sm" title="Reset Zoom">
-                      Reset
-                    </Button>
-                    <Button onClick={onFitToView} variant="outline" size="sm" title="Fit to View">
-                      Fit
-                    </Button>
-                    <Button onClick={onZoomIn} variant="outline" size="sm" title="Zoom In">
-                      +
-                    </Button>
-                    <Text size="xs" c="dimmed" ml="sm">
-                      {Math.round(zoomLevel * 100)}%
-                    </Text>
-                  </Group>
                 </Group>
-                <Box style={{ flex: 1, position: "relative", overflow: "hidden", minHeight: "400px", width: "100%", height: "100%" }}>
-                  <canvas
-                    ref={canvasRef}
-                    style={{
-                      width: "100%",
-                      height: "100%",
-                      border: "1px solid #dee2e6",
-                      borderRadius: "0.375rem",
-                      backgroundColor: "white",
-                      display: "block",
-                      position: "absolute",
-                      top: 0,
-                      left: 0,
-                    }}
-                  />
+                <Box style={{ flex: 1, minHeight: "400px", width: "100%", height: "100%" }}>
+                  <DesignWorkspace visibleItemIds={visibleItemIds} />
                 </Box>
               </Box>
             )

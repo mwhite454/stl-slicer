@@ -11,3 +11,4 @@
 - [ ] User can export the SVG paths as a zip file
 - [ ] User can export the SVG paths as a single SVG file
 - [ ] User can move and arrange SVG's generated from multiple layers in the workspace in order to create a final design
+- [ ] Developer can run functional unit tests for components and slicer utils. 

@@ -6,6 +6,7 @@ import { useElementSize } from '@mantine/hooks';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { rectPathData } from '@/lib/maker/generateSvgPath';
 import { transformForMakerPath } from '@/lib/coords';
+import makerjs from 'makerjs';
 import { DndContext, DragEndEvent, DragMoveEvent, DragStartEvent, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { WorkspaceSvg } from '@/components/workspace/WorkspaceSvg';
 import { DraggablePath } from './DraggablePath';
@@ -16,7 +17,7 @@ import { MAX_ZOOM, MIN_ZOOM, WHEEL_ZOOM_SENSITIVITY, GRID_LINE_STROKE, MIN_POSIT
 
 type DragOrigin = { id: string; x0: number; y0: number } | null;
 
-export function WorkspaceStage() {
+export function WorkspaceStage({ visibleItemIds }: { visibleItemIds?: string[] }) {
   const bounds = useWorkspaceStore((s) => s.bounds);
   const grid = useWorkspaceStore((s) => s.grid);
   const viewport = useWorkspaceStore((s) => s.viewport);
@@ -51,12 +52,93 @@ export function WorkspaceStage() {
   const dragOriginRef = useRef<DragOrigin>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [dragPosMm, setDragPosMm] = useState<{ x: number; y: number } | null>(null);
-  // Imperative path refs for high-FPS drag updates without React re-renders
-  const pathRefs = useRef<Map<string, SVGPathElement>>(new Map());
-  const setPathRef = (id: string, el: SVGPathElement | null) => {
+  // Imperative group refs for high-FPS drag updates without React re-renders
+  const pathRefs = useRef<Map<string, SVGGraphicsElement>>(new Map());
+  const setPathRef = (id: string, el: SVGGraphicsElement | null) => {
     if (el) pathRefs.current.set(id, el);
     else pathRefs.current.delete(id);
   };
+
+  // Debug origin/transform mode toggles for sliceLayer alignment investigation
+  const [debugMode, setDebugMode] = useState<'A' | 'B' | 'C' | 'D'>('D');
+  const [selectedMetrics, setSelectedMetrics] = useState<{
+    mode: 'A' | 'B' | 'C' | 'D';
+    origin: [number, number];
+    transform: string;
+    bbox: { x: number; y: number; width: number; height: number } | null;
+  } | null>(null);
+
+  // Selected item JSON for Perf HUD (prettified)
+  const selectedItemJson = useMemo(() => {
+    const id = selectedIds[0];
+    if (!id) return null;
+    const it = items.find((x) => x.id === id);
+    if (!it) return null;
+    try {
+      return JSON.stringify(it, null, 2);
+    } catch (_e) {
+      return null;
+    }
+  }, [selectedIds, items]);
+
+  // Compute metrics for the first selected sliceLayer for HUD display
+  useEffect(() => {
+    const id = selectedIds[0];
+    if (!id) {
+      setSelectedMetrics(null);
+      return;
+    }
+    const it = items.find((x) => x.id === id);
+    if (!it || it.type !== 'sliceLayer') {
+      setSelectedMetrics(null);
+      return;
+    }
+    const extRaw = (makerjs as any).measure.modelExtents(it.layer.makerJsModel);
+    if (!extRaw) {
+      setSelectedMetrics(null);
+      return;
+    }
+    const planeAware = Boolean(it.layer.plane);
+    const metaExt = it.layer.uvExtents;
+    const minU = metaExt?.minU ?? extRaw.low[0];
+    const minV = metaExt?.minV ?? extRaw.low[1];
+    const maxU = metaExt?.maxU ?? extRaw.high[0];
+    const maxV = metaExt?.maxV ?? extRaw.high[1];
+    const height = Math.max(0, maxV - minV);
+    let origin: [number, number];
+    if (planeAware) {
+      origin = [-minU, -maxV] as [number, number];
+    } else {
+      const minX = extRaw.low[0];
+      const minY = extRaw.low[1];
+      const maxY = extRaw.high[1];
+      origin = (debugMode === 'A' || debugMode === 'B') ? ([-minX, -minY] as [number, number]) : ([-minX, -maxY] as [number, number]);
+    }
+    const transform = planeAware
+      ? transformForMakerPath(it.position.x, it.position.y, height)
+      : (debugMode === 'A' || debugMode === 'C'
+        ? `translate(${it.position.x} ${it.position.y})`
+        : transformForMakerPath(it.position.x, it.position.y, height));
+    const el = pathRefs.current.get(id) || null;
+    let bbox: { x: number; y: number; width: number; height: number } | null = null;
+    try {
+      if (el) {
+        const b = (el as any as SVGGraphicsElement).getBBox();
+        bbox = { x: b.x, y: b.y, width: b.width, height: b.height };
+      }
+    } catch (_e) {
+      bbox = null;
+    }
+    setSelectedMetrics({ mode: debugMode, origin, transform, bbox });
+  }, [selectedIds, items, debugMode]);
+
+  // Filter items to render, if a visibility list is provided
+  const renderItems = useMemo(() => {
+    if (!visibleItemIds) return items; // default: render all
+    if (visibleItemIds.length === 0) return [] as typeof items; // explicitly none
+    const set = new Set(visibleItemIds);
+    return items.filter((it) => set.has(it.id));
+  }, [items, visibleItemIds]);
 
   // Map client (px) to workspace mm using current group CTM
   const clientToMm = (clientX: number, clientY: number) => {
@@ -233,8 +315,24 @@ export function WorkspaceStage() {
     let nx = x0 + dxMm;
     let ny = y0 + dyMm;
     // Clamp within bounds (ensuring item stays fully inside)
-    const itemWidth = item.type === 'rectangle' ? item.rect.width : 100; // Placeholder width for sliceLayer
-    const itemHeight = item.type === 'rectangle' ? item.rect.height : 100; // Placeholder height for sliceLayer
+    let itemWidth = 100;
+    let itemHeight = 100;
+    if (item.type === 'rectangle') {
+      itemWidth = item.rect.width;
+      itemHeight = item.rect.height;
+    } else if (item.type === 'sliceLayer') {
+      const extRaw = (makerjs as any).measure.modelExtents(item.layer.makerJsModel);
+      if (extRaw) {
+        const planeAware = Boolean(item.layer.plane);
+        const metaExt = item.layer.uvExtents;
+        const minU = planeAware ? (metaExt?.minU ?? extRaw.low[0]) : extRaw.low[0];
+        const minV = planeAware ? (metaExt?.minV ?? extRaw.low[1]) : extRaw.low[1];
+        const maxU = planeAware ? (metaExt?.maxU ?? extRaw.high[0]) : extRaw.high[0];
+        const maxV = planeAware ? (metaExt?.maxV ?? extRaw.high[1]) : extRaw.high[1];
+        itemWidth = Math.max(0, maxU - minU);
+        itemHeight = Math.max(0, maxV - minV);
+      }
+    }
     nx = Math.max(MIN_POSITION_MM, Math.min(bounds.width - itemWidth, nx));
     ny = Math.max(MIN_POSITION_MM, Math.min(bounds.height - itemHeight, ny));
     if (grid.snap && grid.size > 0) {
@@ -250,8 +348,23 @@ export function WorkspaceStage() {
         if (!pending || !activeId) return;
         const el = pathRefs.current.get(activeId);
         if (el) {
-          const itemHeight = item.type === 'rectangle' ? item.rect.height : 100; // Placeholder height for sliceLayer 
-          el.setAttribute('transform', transformForMakerPath(pending.x, pending.y, itemHeight));
+          if (item.type === 'sliceLayer') {
+            const extRaw = (makerjs as any).measure.modelExtents(item.layer.makerJsModel);
+            const planeAware = Boolean(item.layer.plane);
+            const metaExt = item.layer.uvExtents;
+            const minV = extRaw ? (planeAware ? (metaExt?.minV ?? extRaw.low[1]) : extRaw.low[1]) : 0;
+            const maxV = extRaw ? (planeAware ? (metaExt?.maxV ?? extRaw.high[1]) : extRaw.high[1]) : 0;
+            const ih = Math.max(0, maxV - minV);
+            const t = planeAware
+              ? transformForMakerPath(pending.x, pending.y, ih)
+              : ((debugMode === 'A' || debugMode === 'C')
+                ? `translate(${pending.x} ${pending.y})`
+                : transformForMakerPath(pending.x, pending.y, ih));
+            el.setAttribute('transform', t);
+          } else {
+            const ih = item.rect.height;
+            el.setAttribute('transform', transformForMakerPath(pending.x, pending.y, ih));
+          }
         }
       });
     }
@@ -292,8 +405,24 @@ export function WorkspaceStage() {
       nx = Math.round(nx / grid.size) * grid.size;
       ny = Math.round(ny / grid.size) * grid.size;
     }
-    const itemWidth = item.type === 'rectangle' ? item.rect.width : 100; // Placeholder width for sliceLayer
-    const itemHeight = item.type === 'rectangle' ? item.rect.height : 100; // Placeholder height for sliceLayer
+    let itemWidth = 100;
+    let itemHeight = 100;
+    if (item.type === 'rectangle') {
+      itemWidth = item.rect.width;
+      itemHeight = item.rect.height;
+    } else if (item.type === 'sliceLayer') {
+      const extRaw = (makerjs as any).measure.modelExtents(item.layer.makerJsModel);
+      if (extRaw) {
+        const planeAware = Boolean(item.layer.plane);
+        const metaExt = item.layer.uvExtents;
+        const minU = planeAware ? (metaExt?.minU ?? extRaw.low[0]) : extRaw.low[0];
+        const minV = planeAware ? (metaExt?.minV ?? extRaw.low[1]) : extRaw.low[1];
+        const maxU = planeAware ? (metaExt?.maxU ?? extRaw.high[0]) : extRaw.high[0];
+        const maxV = planeAware ? (metaExt?.maxV ?? extRaw.high[1]) : extRaw.high[1];
+        itemWidth = Math.max(0, maxU - minU);
+        itemHeight = Math.max(0, maxV - minV);
+      }
+    }
     nx = Math.max(0, Math.min(bounds.width - itemWidth, nx));
     ny = Math.max(0, Math.min(bounds.height - itemHeight, ny));
     updateItemPosition(id, nx, ny);
@@ -321,13 +450,13 @@ export function WorkspaceStage() {
 
   useEffect(() => {
     if (!fitToBoundsRequestId) return;
-    if (!items.length) {
+    if (!renderItems.length) {
       setZoom(1);
       setPan({ x: 0, y: 0 });
       return;
     }
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    for (const it of items) {
+    for (const it of renderItems) {
       if (it.type === 'rectangle') {
         const x1 = it.position.x;
         const y1 = it.position.y;
@@ -335,6 +464,24 @@ export function WorkspaceStage() {
         const y2 = it.position.y + it.rect.height;
         minX = Math.min(minX, x1); minY = Math.min(minY, y1);
         maxX = Math.max(maxX, x2); maxY = Math.max(maxY, y2);
+      } else if (it.type === 'sliceLayer') {
+        const extRaw = (makerjs as any).measure.modelExtents(it.layer.makerJsModel);
+        if (extRaw) {
+          const planeAware = Boolean(it.layer.plane);
+          const metaExt = it.layer.uvExtents;
+          const minU = planeAware ? (metaExt?.minU ?? extRaw.low[0]) : extRaw.low[0];
+          const minV = planeAware ? (metaExt?.minV ?? extRaw.low[1]) : extRaw.low[1];
+          const maxU = planeAware ? (metaExt?.maxU ?? extRaw.high[0]) : extRaw.high[0];
+          const maxV = planeAware ? (metaExt?.maxV ?? extRaw.high[1]) : extRaw.high[1];
+          const w = Math.max(0, maxU - minU);
+          const h = Math.max(0, maxV - minV);
+          const x1 = it.position.x;
+          const y1 = it.position.y;
+          const x2 = x1 + w;
+          const y2 = y1 + h;
+          minX = Math.min(minX, x1); minY = Math.min(minY, y1);
+          maxX = Math.max(maxX, x2); maxY = Math.max(maxY, y2);
+        }
       }
     }
     if (!Number.isFinite(minX)) {
@@ -385,7 +532,7 @@ export function WorkspaceStage() {
             <WorkspaceBorder width={bounds.width} height={bounds.height} />
 
             {/* Items */}
-            {items.map((it) => {
+            {renderItems.map((it) => {
               const sel = selectedIds.includes(it.id);
               if (it.type === 'rectangle') {
                 const d = rectPathData(it.rect.width, it.rect.height);
@@ -415,25 +562,109 @@ export function WorkspaceStage() {
                   </g>
                 );
               } else if (it.type === 'sliceLayer') {
-                // For sliceLayer items, we'll need to convert the maker.js model to SVG paths
-                // This is a placeholder implementation - we'll need to implement the actual conversion
                 const posX = activeId === it.id && dragPosMm ? dragPosMm.x : it.position.x;
                 const posY = activeId === it.id && dragPosMm ? dragPosMm.y : it.position.y;
-                // TODO: Convert maker.js model to SVG paths
-                // For now, we'll just render a placeholder rectangle
-                const width = 100; // Placeholder width
-                const height = 100; // Placeholder height
-                const d = rectPathData(width, height);
+                const extRaw = (makerjs as any).measure.modelExtents(it.layer.makerJsModel);
+                if (!extRaw) return null;
+                const planeAware = Boolean(it.layer.plane);
+                const metaExt = it.layer.uvExtents;
+                const minU = metaExt?.minU ?? extRaw.low[0];
+                const minV = metaExt?.minV ?? extRaw.low[1];
+                const maxU = metaExt?.maxU ?? extRaw.high[0];
+                const maxV = metaExt?.maxV ?? extRaw.high[1];
+                const width = Math.max(0, maxU - minU);
+                const height = Math.max(0, maxV - minV);
+                // Plane-aware standardized origin/transform or fallback to debug modes
+                let origin: [number, number];
+                if (planeAware) {
+                  origin = [-minU, -maxV];
+                } else {
+                  const minX = extRaw.low[0];
+                  const minY = extRaw.low[1];
+                  const maxY = extRaw.high[1];
+                  if (debugMode === 'A' || debugMode === 'B') origin = [-minX, -minY];
+                  else origin = [-minX, -maxY];
+                }
+                const d = (makerjs as any).exporter.toSVGPathData(it.layer.makerJsModel, { origin } as any) as unknown as string;
+                console.log(`figuring out location issue...this is current d`, d);
+                const dbgLowX = planeAware ? minU : extRaw.low[0];
+                const dbgLowY = planeAware ? minV : extRaw.low[1];
+                const dbgHighY = planeAware ? maxV : extRaw.high[1];
+                console.log(`figuring out location issue...ext lows/high:`, { lowX: dbgLowX, lowY: dbgLowY, highY: dbgHighY });
+                console.log(`figuring out location issue...this is current width, height`, width, height);
+                console.log(`figuring out location issue...this is current posX, posY`, posX, posY);
+
+                // Selection overlay as maker.js path: padded rectangle in local maker space
+                const mmpp = getMmPerPx();
+                const ox = selectionOverlayOffsetPx * mmpp.x;
+                const oy = selectionOverlayOffsetPx * mmpp.y;
+                let selectionD: string | undefined;
+                try {
+                  const selRectModel = new (makerjs as any).models.Rectangle(width + ox * 2, height + oy * 2);
+                  // Local-space top-left depends on exporter origin choice
+                  const yTopLocal = planeAware ? -height : ((debugMode === 'A' || debugMode === 'B') ? 0 : -height);
+                  const out = (makerjs as any).exporter.toSVGPathData(selRectModel, { origin: [-ox, yTopLocal - oy] } as any) as unknown;
+                  selectionD = typeof out === 'string' ? out : Object.values(out as Record<string, string>).join(' ');
+                } catch (_e) {
+                  selectionD = undefined;
+                }
+                console.log(`figuring out location issue...this is current selectionD`, selectionD);
+
+                const transformStr = planeAware
+                  ? transformForMakerPath(posX, posY, height)
+                  : ((debugMode === 'A' || debugMode === 'C')
+                    ? `translate(${posX} ${posY})`
+                    : transformForMakerPath(posX, posY, height));
                 return (
                   <g key={it.id}>
                     <DraggablePath
                       id={it.id}
                       d={d}
-                      transform={transformForMakerPath(posX, posY, height)}
+                      transform={transformStr}
                       selected={sel}
+                      selectionD={selectionD}
                       setPathRef={setPathRef}
                       onClick={() => selectOnly(it.id)}
                     />
+                    {showPerfHud && (
+                      <>
+                        {/* Global-space expected bbox */}
+                        <rect
+                          x={posX}
+                          y={posY}
+                          width={width}
+                          height={height}
+                          fill="none"
+                          stroke="#00cc66"
+                          strokeWidth={0.35}
+                          vectorEffect="non-scaling-stroke"
+                          pointerEvents="none"
+                        />
+                        {/* Local-space bbox under same transform as path */}
+                        <g transform={transformStr}>
+                          <rect
+                            x={0}
+                            y={planeAware ? -height : ((debugMode === 'A' || debugMode === 'B') ? 0 : -height)}
+                            width={width}
+                            height={height}
+                            fill="none"
+                            stroke="#ff00cc"
+                            strokeWidth={0.35}
+                            vectorEffect="non-scaling-stroke"
+                            pointerEvents="none"
+                          />
+                          {/* Anchor markers to understand baseline */}
+                          <g pointerEvents="none">
+                            {/* Origin crosshair at (0,0) */}
+                            <line x1={-2} y1={0} x2={2} y2={0} stroke="#ffaa00" strokeWidth={0.3} vectorEffect="non-scaling-stroke" />
+                            <line x1={0} y1={-2} x2={0} y2={2} stroke="#ffaa00" strokeWidth={0.3} vectorEffect="non-scaling-stroke" />
+                            {/* Baseline at y=height (for translate(x,y) pairing) */}
+                            <line x1={-4} y1={height} x2={4} y2={height} stroke="#66aaff" strokeWidth={0.3} vectorEffect="non-scaling-stroke" />
+                          </g>
+                        </g>
+                      </>
+                    )}
+                    {/* External SelectionWrapper removed for sliceLayer; selection is indicated by DraggablePath's internal overlay */}
                   </g>
                 );
               }
@@ -449,10 +680,13 @@ export function WorkspaceStage() {
           selectedCount={selectedIds.length}
           zoom={viewport.zoom}
           pan={viewport.pan}
+          selectedItemJson={selectedItemJson}
+          debugMode={debugMode}
+          onDebugModeChange={(m) => setDebugMode(m)}
+          selectedMetrics={selectedMetrics}
         />
       )}
     </Box>
   );
 }
-
 
