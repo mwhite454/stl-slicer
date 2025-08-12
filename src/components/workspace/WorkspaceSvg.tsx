@@ -6,16 +6,17 @@ export type WorkspaceSvgProps = {
   bounds: { width: number; height: number };
   isPanning: boolean;
   onClearSelection: () => void;
-  onWheel: React.WheelEventHandler<SVGSVGElement>;
+  onWheel?: React.WheelEventHandler<SVGSVGElement>; // Made optional - handled by non-passive listener
   onPointerDown: React.PointerEventHandler<SVGSVGElement>;
   onPointerMove: React.PointerEventHandler<SVGSVGElement>;
   onPointerUp: React.PointerEventHandler<SVGSVGElement>;
+  onClick?: React.MouseEventHandler<SVGSVGElement>;
   children: React.ReactNode;
 };
 
 export const WorkspaceSvg = forwardRef<SVGSVGElement, WorkspaceSvgProps>(
   (
-    { bounds, isPanning, onClearSelection, onWheel, onPointerDown, onPointerMove, onPointerUp, children },
+    { bounds, isPanning, onClearSelection, onWheel, onPointerDown, onPointerMove, onPointerUp, onClick, children },
     ref,
   ) => (
     <svg
@@ -33,7 +34,10 @@ export const WorkspaceSvg = forwardRef<SVGSVGElement, WorkspaceSvgProps>(
         cursor: isPanning ? 'grabbing' : undefined,
       }}
       className="workspace-svg"
-      onClick={onClearSelection}
+      onClick={(e) => {
+        onClick?.(e);
+        if (!e.defaultPrevented) onClearSelection();
+      }}
       onWheel={onWheel}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}

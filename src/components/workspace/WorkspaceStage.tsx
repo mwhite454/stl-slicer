@@ -52,6 +52,12 @@ export function WorkspaceStage({ visibleItemIds }: { visibleItemIds?: string[] }
   const dragOriginRef = useRef<DragOrigin>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [dragPosMm, setDragPosMm] = useState<{ x: number; y: number } | null>(null);
+  // Debug: Track click positions
+  const [debugClicks, setDebugClicks] = useState<Array<{ 
+    screen: { x: number; y: number };
+    world: { x: number; y: number };
+    label: string;
+  }>>([]);
   // Imperative group refs for high-FPS drag updates without React re-renders
   const pathRefs = useRef<Map<string, SVGGraphicsElement>>(new Map());
   const setPathRef = (id: string, el: SVGGraphicsElement | null) => {
@@ -59,14 +65,7 @@ export function WorkspaceStage({ visibleItemIds }: { visibleItemIds?: string[] }
     else pathRefs.current.delete(id);
   };
 
-  // Debug origin/transform mode toggles for sliceLayer alignment investigation
-  const [debugMode, setDebugMode] = useState<'A' | 'B' | 'C' | 'D'>('D');
-  const [selectedMetrics, setSelectedMetrics] = useState<{
-    mode: 'A' | 'B' | 'C' | 'D';
-    origin: [number, number];
-    transform: string;
-    bbox: { x: number; y: number; width: number; height: number } | null;
-  } | null>(null);
+  // Debug toggles removed after finalizing plane-aware transform/origin pairing
 
   // Selected item JSON for Perf HUD (prettified)
   const selectedItemJson = useMemo(() => {
@@ -81,56 +80,7 @@ export function WorkspaceStage({ visibleItemIds }: { visibleItemIds?: string[] }
     }
   }, [selectedIds, items]);
 
-  // Compute metrics for the first selected sliceLayer for HUD display
-  useEffect(() => {
-    const id = selectedIds[0];
-    if (!id) {
-      setSelectedMetrics(null);
-      return;
-    }
-    const it = items.find((x) => x.id === id);
-    if (!it || it.type !== 'sliceLayer') {
-      setSelectedMetrics(null);
-      return;
-    }
-    const extRaw = (makerjs as any).measure.modelExtents(it.layer.makerJsModel);
-    if (!extRaw) {
-      setSelectedMetrics(null);
-      return;
-    }
-    const planeAware = Boolean(it.layer.plane);
-    const metaExt = it.layer.uvExtents;
-    const minU = metaExt?.minU ?? extRaw.low[0];
-    const minV = metaExt?.minV ?? extRaw.low[1];
-    const maxU = metaExt?.maxU ?? extRaw.high[0];
-    const maxV = metaExt?.maxV ?? extRaw.high[1];
-    const height = Math.max(0, maxV - minV);
-    let origin: [number, number];
-    if (planeAware) {
-      origin = [-minU, -maxV] as [number, number];
-    } else {
-      const minX = extRaw.low[0];
-      const minY = extRaw.low[1];
-      const maxY = extRaw.high[1];
-      origin = (debugMode === 'A' || debugMode === 'B') ? ([-minX, -minY] as [number, number]) : ([-minX, -maxY] as [number, number]);
-    }
-    const transform = planeAware
-      ? transformForMakerPath(it.position.x, it.position.y, height)
-      : (debugMode === 'A' || debugMode === 'C'
-        ? `translate(${it.position.x} ${it.position.y})`
-        : transformForMakerPath(it.position.x, it.position.y, height));
-    const el = pathRefs.current.get(id) || null;
-    let bbox: { x: number; y: number; width: number; height: number } | null = null;
-    try {
-      if (el) {
-        const b = (el as any as SVGGraphicsElement).getBBox();
-        bbox = { x: b.x, y: b.y, width: b.width, height: b.height };
-      }
-    } catch (_e) {
-      bbox = null;
-    }
-    setSelectedMetrics({ mode: debugMode, origin, transform, bbox });
-  }, [selectedIds, items, debugMode]);
+  // Removed metrics debug effect after alignment finalized
 
   // Filter items to render, if a visibility list is provided
   const renderItems = useMemo(() => {
@@ -152,33 +102,40 @@ export function WorkspaceStage({ visibleItemIds }: { visibleItemIds?: string[] }
     if (!m) return null;
     const inv = m.inverse();
     const p = pt.matrixTransform(inv as any);
-    return { x: p.x, y: p.y };
+    // Round to 0.1mm precision to eliminate micro-differences from floating point calculations
+    const precision = 0.1;
+    return { 
+      x: Math.round(p.x / precision) * precision, 
+      y: Math.round(p.y / precision) * precision 
+    };
   };
 
-  const onWheel = (e: React.WheelEvent<SVGSVGElement>) => {
-    // Zoom anchored at cursor
-    e.preventDefault();
-    const svg = svgRef.current as unknown as SVGSVGElement | null;
-    const g = contentGroupRef.current;
-    if (!svg || !g) return;
-    const pt = svg.createSVGPoint();
-    pt.x = e.clientX;
-    pt.y = e.clientY;
-    const ctm = g.getScreenCTM();
-    if (!ctm) return;
-    const p = pt.matrixTransform(ctm.inverse());
-    const delta = -e.deltaY * Math.max(MIN_SPEED_MULT, zoomSpeedMultiplier); // natural: scroll up to zoom in
-    const scale = Math.exp(delta * WHEEL_ZOOM_SENSITIVITY);
-    const nextZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, viewport.zoom * scale));
-    const applied = nextZoom / viewport.zoom;
-    // Keep cursor point stable: adjust pan so p maps to same screen position
-    const newPan = {
-      x: p.x - (p.x - viewport.pan.x) * applied,
-      y: p.y - (p.y - viewport.pan.y) * applied,
-    };
-    setZoom(nextZoom);
-    setPan(newPan);
+  // Debug: Handle click for coordinate debugging
+  const handleDebugClick = (e: React.MouseEvent) => {
+    if (!e.shiftKey) return; // Only capture with Shift+Click
+    
+    const rect = (e.currentTarget as SVGElement).getBoundingClientRect();
+    const screenX = e.clientX - rect.left;
+    const screenY = e.clientY - rect.top;
+    const worldPos = clientToMm(e.clientX, e.clientY);
+    
+    if (worldPos) {
+      const clickNumber = debugClicks.length + 1;
+      const label = `Click ${clickNumber}`;
+      setDebugClicks(prev => [...prev, {
+        screen: { x: screenX, y: screenY },
+        world: worldPos,
+        label
+      }]);
+      console.log(`Debug ${label}:`, {
+        screen: { x: screenX.toFixed(1), y: screenY.toFixed(1) },
+        world: { x: worldPos.x.toFixed(2), y: worldPos.y.toFixed(2) }
+      });
+    }
   };
+
+  // onWheel handler removed - now handled by non-passive listener in useEffect below
+  // to avoid "Unable to preventDefault inside passive event listener" errors
 
   const onPointerDown = (e: React.PointerEvent<SVGSVGElement>) => {
     if (e.button === 1) {
@@ -338,6 +295,12 @@ export function WorkspaceStage({ visibleItemIds }: { visibleItemIds?: string[] }
     if (grid.snap && grid.size > 0) {
       nx = Math.round(nx / grid.size) * grid.size;
       ny = Math.round(ny / grid.size) * grid.size;
+    } else {
+      // Apply 0.1mm precision rounding even when not snapping to grid
+      // This eliminates floating-point micro-differences
+      const precision = 0.1;
+      nx = Math.round(nx / precision) * precision;
+      ny = Math.round(ny / precision) * precision;
     }
     // Schedule an imperative transform update via RAF for smoothness
     dragPendingRef.current = { x: nx, y: ny };
@@ -352,14 +315,10 @@ export function WorkspaceStage({ visibleItemIds }: { visibleItemIds?: string[] }
             const extRaw = (makerjs as any).measure.modelExtents(item.layer.makerJsModel);
             const planeAware = Boolean(item.layer.plane);
             const metaExt = item.layer.uvExtents;
-            const minV = extRaw ? (planeAware ? (metaExt?.minV ?? extRaw.low[1]) : extRaw.low[1]) : 0;
-            const maxV = extRaw ? (planeAware ? (metaExt?.maxV ?? extRaw.high[1]) : extRaw.high[1]) : 0;
+            const minV = extRaw ? (metaExt?.minV ?? extRaw.low[1]) : 0;
+            const maxV = extRaw ? (metaExt?.maxV ?? extRaw.high[1]) : 0;
             const ih = Math.max(0, maxV - minV);
-            const t = planeAware
-              ? transformForMakerPath(pending.x, pending.y, ih)
-              : ((debugMode === 'A' || debugMode === 'C')
-                ? `translate(${pending.x} ${pending.y})`
-                : transformForMakerPath(pending.x, pending.y, ih));
+            const t = transformForMakerPath(pending.x, pending.y, ih);
             el.setAttribute('transform', t);
           } else {
             const ih = item.rect.height;
@@ -386,14 +345,22 @@ export function WorkspaceStage({ visibleItemIds }: { visibleItemIds?: string[] }
     setDragPosMm(null);
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    // Nudge selected item(s) with arrow keys
-    const id = selectedIds[0];
-    if (!id) return;
-    const dir = DIRECTION_KEY_MAP[e.key];
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    const key = e.key;
+    // Clear debug clicks with 'C' key (uppercase) or 'c' with shift
+    if ((key === 'C' || key === 'c') && e.shiftKey) {
+      e.preventDefault();
+      e.stopPropagation();
+      setDebugClicks([]);
+      console.log('Debug clicks cleared');
+      return;
+    }
+    const dir = DIRECTION_KEY_MAP[key];
     if (!dir) return;
     const { dx, dy } = dir;
     e.preventDefault();
+    const id = selectedIds[0];
+    if (!id) return;
     const item = items.find((it) => it.id === id);
     if (!item) return;
     // Use grid size when holding Shift, otherwise configurable nudge distance in mm
@@ -427,6 +394,38 @@ export function WorkspaceStage({ visibleItemIds }: { visibleItemIds?: string[] }
     ny = Math.max(0, Math.min(bounds.height - itemHeight, ny));
     updateItemPosition(id, nx, ny);
   };
+
+  // Add non-passive wheel event listener to prevent passive event warnings
+  useEffect(() => {
+    const svg = svgRef.current as unknown as SVGSVGElement | null;
+    if (!svg) return;
+    
+    const handleWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const g = contentGroupRef.current;
+      if (!g) return;
+      const pt = svg.createSVGPoint();
+      pt.x = e.clientX;
+      pt.y = e.clientY;
+      const ctm = g.getScreenCTM();
+      if (!ctm) return;
+      const p = pt.matrixTransform(ctm.inverse());
+      const delta = -e.deltaY * Math.max(MIN_SPEED_MULT, zoomSpeedMultiplier);
+      const scale = Math.exp(delta * WHEEL_ZOOM_SENSITIVITY);
+      const nextZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, viewport.zoom * scale));
+      const applied = nextZoom / viewport.zoom;
+      const newPan = {
+        x: p.x - (p.x - viewport.pan.x) * applied,
+        y: p.y - (p.y - viewport.pan.y) * applied,
+      };
+      setZoom(nextZoom);
+      setPan(newPan);
+    };
+    
+    // Add as non-passive to allow preventDefault
+    svg.addEventListener('wheel', handleWheel, { passive: false });
+    return () => svg.removeEventListener('wheel', handleWheel);
+  }, [viewport.zoom, viewport.pan, zoomSpeedMultiplier, setZoom, setPan]);
 
   useEffect(() => {
     if (!showPerfHud) return;
@@ -517,10 +516,11 @@ export function WorkspaceStage({ visibleItemIds }: { visibleItemIds?: string[] }
           bounds={bounds}
           isPanning={isPanning}
           onClearSelection={() => selectOnly(null)}
-          onWheel={onWheel}
+          // onWheel removed - handled by non-passive listener in useEffect
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
+          onClick={handleDebugClick}
         >
           
           {/* Pan/Zoom group in mm */}
@@ -551,7 +551,7 @@ export function WorkspaceStage({ visibleItemIds }: { visibleItemIds?: string[] }
                     <DraggablePath
                       id={it.id}
                       d={d}
-                      transform={transformForMakerPath(posX, posY, it.rect.height)}
+                      transform={transformForMakerPath(posX, posY, it.rect.height*-1)}
                       selected={sel}
                       setPathRef={setPathRef}
                       onClick={() => selectOnly(it.id)}
@@ -566,7 +566,6 @@ export function WorkspaceStage({ visibleItemIds }: { visibleItemIds?: string[] }
                 const posY = activeId === it.id && dragPosMm ? dragPosMm.y : it.position.y;
                 const extRaw = (makerjs as any).measure.modelExtents(it.layer.makerJsModel);
                 if (!extRaw) return null;
-                const planeAware = Boolean(it.layer.plane);
                 const metaExt = it.layer.uvExtents;
                 const minU = metaExt?.minU ?? extRaw.low[0];
                 const minV = metaExt?.minV ?? extRaw.low[1];
@@ -574,47 +573,25 @@ export function WorkspaceStage({ visibleItemIds }: { visibleItemIds?: string[] }
                 const maxV = metaExt?.maxV ?? extRaw.high[1];
                 const width = Math.max(0, maxU - minU);
                 const height = Math.max(0, maxV - minV);
-                // Plane-aware standardized origin/transform or fallback to debug modes
-                let origin: [number, number];
-                if (planeAware) {
-                  origin = [-minU, -maxV];
-                } else {
-                  const minX = extRaw.low[0];
-                  const minY = extRaw.low[1];
-                  const maxY = extRaw.high[1];
-                  if (debugMode === 'A' || debugMode === 'B') origin = [-minX, -minY];
-                  else origin = [-minX, -maxY];
-                }
+                // Use the same origin shift as before to normalize coordinates
+                const origin: [number, number] = [-minU, -maxV];
                 const d = (makerjs as any).exporter.toSVGPathData(it.layer.makerJsModel, { origin } as any) as unknown as string;
-                console.log(`figuring out location issue...this is current d`, d);
-                const dbgLowX = planeAware ? minU : extRaw.low[0];
-                const dbgLowY = planeAware ? minV : extRaw.low[1];
-                const dbgHighY = planeAware ? maxV : extRaw.high[1];
-                console.log(`figuring out location issue...ext lows/high:`, { lowX: dbgLowX, lowY: dbgLowY, highY: dbgHighY });
-                console.log(`figuring out location issue...this is current width, height`, width, height);
-                console.log(`figuring out location issue...this is current posX, posY`, posX, posY);
 
-                // Selection overlay as maker.js path: padded rectangle in local maker space
+                // Use SelectionWrapper with world-space coordinates
                 const mmpp = getMmPerPx();
                 const ox = selectionOverlayOffsetPx * mmpp.x;
                 const oy = selectionOverlayOffsetPx * mmpp.y;
-                let selectionD: string | undefined;
-                try {
-                  const selRectModel = new (makerjs as any).models.Rectangle(width + ox * 2, height + oy * 2);
-                  // Local-space top-left depends on exporter origin choice
-                  const yTopLocal = planeAware ? -height : ((debugMode === 'A' || debugMode === 'B') ? 0 : -height);
-                  const out = (makerjs as any).exporter.toSVGPathData(selRectModel, { origin: [-ox, yTopLocal - oy] } as any) as unknown;
-                  selectionD = typeof out === 'string' ? out : Object.values(out as Record<string, string>).join(' ');
-                } catch (_e) {
-                  selectionD = undefined;
-                }
-                console.log(`figuring out location issue...this is current selectionD`, selectionD);
-
-                const transformStr = planeAware
-                  ? transformForMakerPath(posX, posY, height)
-                  : ((debugMode === 'A' || debugMode === 'C')
-                    ? `translate(${posX} ${posY})`
-                    : transformForMakerPath(posX, posY, height));
+                
+                // The transformForMakerPath adds height, but with origin [-minU, -maxV],
+                // the visual geometry ends up at approximately posY - height
+                // So we need to position the selection overlay there too
+                const selX = posX - ox;
+                const selY = posY - height - oy;  // Match where geometry visually appears
+                const selW = width + ox * 2;
+                const selH = height + oy * 2;
+                
+                // Use the same transform that works for rectangles
+                const transformStr = transformForMakerPath(posX, posY, height);
                 return (
                   <g key={it.id}>
                     <DraggablePath
@@ -622,55 +599,72 @@ export function WorkspaceStage({ visibleItemIds }: { visibleItemIds?: string[] }
                       d={d}
                       transform={transformStr}
                       selected={sel}
-                      selectionD={selectionD}
                       setPathRef={setPathRef}
                       onClick={() => selectOnly(it.id)}
                     />
-                    {showPerfHud && (
+                    {sel && (
                       <>
-                        {/* Global-space expected bbox */}
-                        <rect
-                          x={posX}
-                          y={posY}
-                          width={width}
-                          height={height}
-                          fill="none"
-                          stroke="#00cc66"
-                          strokeWidth={0.35}
-                          vectorEffect="non-scaling-stroke"
-                          pointerEvents="none"
+                        <SelectionWrapper x={selX} y={selY} width={selW} height={selH} />
+                        {/* Debug: show where we think the geometry should be */}
+                        <rect 
+                          x={posX} 
+                          y={posY} 
+                          width={width} 
+                          height={height} 
+                          fill="none" 
+                          stroke="lime" 
+                          strokeWidth="2" 
+                          strokeDasharray="5,5"
+                          opacity="0.7"
                         />
-                        {/* Local-space bbox under same transform as path */}
-                        <g transform={transformStr}>
-                          <rect
-                            x={0}
-                            y={planeAware ? -height : ((debugMode === 'A' || debugMode === 'B') ? 0 : -height)}
-                            width={width}
-                            height={height}
-                            fill="none"
-                            stroke="#ff00cc"
-                            strokeWidth={0.35}
-                            vectorEffect="non-scaling-stroke"
-                            pointerEvents="none"
-                          />
-                          {/* Anchor markers to understand baseline */}
-                          <g pointerEvents="none">
-                            {/* Origin crosshair at (0,0) */}
-                            <line x1={-2} y1={0} x2={2} y2={0} stroke="#ffaa00" strokeWidth={0.3} vectorEffect="non-scaling-stroke" />
-                            <line x1={0} y1={-2} x2={0} y2={2} stroke="#ffaa00" strokeWidth={0.3} vectorEffect="non-scaling-stroke" />
-                            {/* Baseline at y=height (for translate(x,y) pairing) */}
-                            <line x1={-4} y1={height} x2={4} y2={height} stroke="#66aaff" strokeWidth={0.3} vectorEffect="non-scaling-stroke" />
-                          </g>
-                        </g>
+                        <text x={posX + 5} y={posY - 5} fontSize="12" fill="lime">{posX.toFixed(1)}, {posY.toFixed(1)}</text>
                       </>
                     )}
-                    {/* External SelectionWrapper removed for sliceLayer; selection is indicated by DraggablePath's internal overlay */}
                   </g>
                 );
               }
               return null;
             })}
+            
+            {/* Debug click markers */}
+            {debugClicks.map((click, i) => (
+              <g key={i} pointerEvents="none">
+                {/* World space marker */}
+                <circle 
+                  cx={click.world.x} 
+                  cy={click.world.y} 
+                  r="3" 
+                  fill="purple" 
+                  opacity="0.8" 
+                />
+                <text 
+                  x={click.world.x + 5} 
+                  y={click.world.y - 5} 
+                  fontSize="12" 
+                  fill="purple"
+                  fontWeight="bold"
+                  style={{ userSelect: 'text' }}
+                >
+                  {click.label} (World: {click.world.x.toFixed(1)}, {click.world.y.toFixed(1)})
+                </text>
+              </g>
+            ))}
           </g>
+          
+          {/* Screen space debug info overlay */}
+          {debugClicks.length > 0 && (
+            <g transform="translate(10, 20)" pointerEvents="none">
+              <rect x="0" y="0" width="400" height={30 + debugClicks.length * 20} fill="white" opacity="0.9" stroke="purple" />
+              <text x="5" y="15" fontSize="12" fill="purple" fontWeight="bold" style={{ userSelect: 'text' }}>
+                Debug Clicks (Shift+Click to add, Shift+C to clear):
+              </text>
+              {debugClicks.map((click, i) => (
+                <text key={i} x="5" y={35 + i * 20} fontSize="11" fill="black" style={{ userSelect: 'text' }}>
+                  {click.label}: Screen({click.screen.x.toFixed(0)}, {click.screen.y.toFixed(0)}) → World({click.world.x.toFixed(1)}, {click.world.y.toFixed(1)})
+                </text>
+              ))}
+            </g>
+          )}
         </WorkspaceSvg>
       </DndContext>
       {showPerfHud && (
@@ -681,9 +675,6 @@ export function WorkspaceStage({ visibleItemIds }: { visibleItemIds?: string[] }
           zoom={viewport.zoom}
           pan={viewport.pan}
           selectedItemJson={selectedItemJson}
-          debugMode={debugMode}
-          onDebugModeChange={(m) => setDebugMode(m)}
-          selectedMetrics={selectedMetrics}
         />
       )}
     </Box>

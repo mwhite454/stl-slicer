@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState, useRef } from 'react';
-import { StlSlicer as StlSlicerUtil, Axis, LayerData } from '../utils/StlSlicer';
+import type { LayerData } from '../utils/StlSlicer';
 import { exportSvgZip } from '../utils/exportUtils';
 import { useWorkspaceStore } from '../stores/workspaceStore';
 import type { MakerJSModel } from '../lib/coords';
@@ -16,7 +16,9 @@ import { Box, Flex, Text, Alert, Stack, Loader } from '@mantine/core';
 import { ViewModePanel } from './slicer/ViewModePanel';
 import { LayerNavigator } from './slicer/LayerNavigator';
 import { ClearSessionButton } from './slicer/ClearSessionButton';
-import { buildSliceLayerMetadata } from '@/slicing/metadata';
+import makerjs from 'makerjs';
+import { parseStl, getDimensions as getSlicerDimensions, sliceGeometry } from '@/slicing/core';
+import type { Axis, SlicerState } from '@/slicing/types';
 
 // Convert File to base64
 const fileToBase64 = (file: File): Promise<string> =>
@@ -49,12 +51,8 @@ function StlSlicerContent() {
   const previewLayerRestored = useRef(false);
   
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const slicerRef = useRef<StlSlicerUtil | null>(null);
-  
-  // Initialize the slicer
-  useEffect(() => {
-    slicerRef.current = new StlSlicerUtil();
-  }, []);
+  const [slicerState, setSlicerState] = useState<SlicerState | null>(null);
+  const [makerModels, setMakerModels] = useState<MakerJSModel[]>([]);
   
 
   
@@ -129,17 +127,11 @@ function StlSlicerContent() {
     } catch (err) {
       console.error('Failed to save STL file to localStorage', err);
     }
-    
     try {
-      if (!slicerRef.current) {
-        slicerRef.current = new StlSlicerUtil();
-      }
-      
-      await slicerRef.current.loadSTL(selectedFile);
-      const dims = slicerRef.current.getDimensions();
-      if (dims) {
-        setDimensions(dims);
-      }
+      const state = await parseStl(selectedFile);
+      setSlicerState(state);
+      const dims = getSlicerDimensions(state);
+      setDimensions(dims);
     } catch (err) {
       setError('Failed to load STL file. Please check the file format.');
       console.error(err);
@@ -157,9 +149,7 @@ function StlSlicerContent() {
   
   // Auto-slice on file load, axis, or thickness change
   useEffect(() => {
-    if (!slicerRef.current || !file) return;
-    // Check if model is actually loaded before attempting to slice
-    if (!slicerRef.current.isModelLoaded()) return;
+    if (!slicerState || !file) return;
     
     let cancelled = false;
     const doSlice = async () => {
@@ -167,49 +157,39 @@ function StlSlicerContent() {
       setError(null);
       setHasAutoFit(false);
       try {
-        const slicedLayers = slicerRef.current!.sliceModel(axis, layerThickness);
+        const { makerJsModels, layers: metaLayers } = sliceGeometry(slicerState, axis, layerThickness);
         if (cancelled) return;
-        setLayers(slicedLayers);
-        const midIdx = getMiddleNonEmptyLayerIndex(slicedLayers);
+        setMakerModels(makerJsModels);
+        // Map to legacy LayerData shape for UI components that only need z/index
+        const legacyLayers: LayerData[] = metaLayers.map((m) => ({ index: m.layerIndex, z: m.zCoordinate, paths: [] }));
+        setLayers(legacyLayers);
+        const midIdx = Math.floor(metaLayers.length / 2);
         setPreviewLayerIndex(midIdx);
         localStorage.setItem('slicerPreviewLayerIndex', String(midIdx));
-        
-        // NEW: Export sliced layers to workspace store
-        // Generate maker.js models for all layers
-        const makerJsModels = slicerRef.current!.generateMakerJSModels(slicedLayers);
-        
-        // Get the workspace store actions
+
+        // Push layers to workspace store with full metadata
         const workspaceStore = useWorkspaceStore.getState();
-        
         // Clear any existing slice layers from workspace
         const currentItems = workspaceStore.items;
         const sliceLayerIds = currentItems
-          .filter(item => item.type === 'sliceLayer')
-          .map(item => item.id);
-        
-        sliceLayerIds.forEach(id => workspaceStore.deleteItem(id));
-        
-        // Add all sliced layers to workspace with plane/axis metadata
-        const layersToAdd = slicedLayers.map((layer, index) => {
-          const makerJsModel = makerJsModels[index];
-          const meta = buildSliceLayerMetadata(axis, makerJsModel);
-          return {
-            makerJsModel,
-            layerIndex: layer.index,
-            zCoordinate: layer.z,
-            axis,
-            layerThickness,
-            plane: meta.plane,
-            axisMap: meta.axisMap,
-            vUpSign: meta.vUpSign,
-            uvExtents: meta.uvExtents,
-            // Position in real-world coordinates
-            x: 0,
-            y: 0,
-            z: layer.z,
-          };
-        });
-        
+          .filter((item) => item.type === 'sliceLayer')
+          .map((item) => item.id);
+        sliceLayerIds.forEach((id) => workspaceStore.deleteItem(id));
+
+        const layersToAdd = metaLayers.map((m, index) => ({
+          makerJsModel: makerJsModels[index],
+          layerIndex: m.layerIndex,
+          zCoordinate: m.zCoordinate,
+          axis: m.axis,
+          layerThickness: m.layerThickness,
+          plane: m.plane,
+          axisMap: m.axisMap,
+          vUpSign: m.vUpSign,
+          uvExtents: m.uvExtents,
+          x: 0,
+          y: 0,
+          z: m.zCoordinate,
+        }));
         workspaceStore.addMultipleSliceLayers(layersToAdd);
 
       } catch (err) {
@@ -223,20 +203,17 @@ function StlSlicerContent() {
     };
     doSlice();
     return () => { cancelled = true; };
-  }, [file, axis, layerThickness]);
+  }, [file, axis, layerThickness, slicerState]);
   
-  // Load file into slicer if file exists but model isn't loaded
+  // Parse STL if a file exists but no slicer state is present
   useEffect(() => {
-    if (!file || !slicerRef.current) return;
-    if (slicerRef.current.isModelLoaded()) return; // Already loaded
-    
+    if (!file || slicerState) return;
     const loadFile = async () => {
       try {
-        await slicerRef.current!.loadSTL(file);
-        const dims = slicerRef.current!.getDimensions();
-        if (dims) {
-          setDimensions(dims);
-        }
+        const state = await parseStl(file);
+        setSlicerState(state);
+        const dims = getSlicerDimensions(state);
+        setDimensions(dims);
         setError(null);
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : 'Failed to load STL file. Please check the file format.';
@@ -244,9 +221,8 @@ function StlSlicerContent() {
         console.error('File loading error:', err);
       }
     };
-    
     loadFile();
-  }, [file]);
+  }, [file, slicerState]);
   
   // Handle layer thickness change
   const handleLayerThicknessChange = useCallback((newThickness: number) => {
@@ -330,24 +306,33 @@ function StlSlicerContent() {
   
   // Export sliced layers as SVG files in a ZIP archive
   const handleExport = useCallback(async () => {
-    if (!slicerRef.current || !file || layers.length === 0) {
+    if (!file || layers.length === 0 || makerModels.length === 0) {
       setError('No sliced layers to export');
       return;
     }
-    
     try {
-      const svgContents = layers.map(layer => ({
-        layer,
-        svg: slicerRef.current!.generateSVG(layer),
-        makerjsSVG: slicerRef.current!.makerJSModelToSVG(slicerRef.current!.generateMakerJSModel(layer))
-      }));
-
-      await exportSvgZip(svgContents, `${file.name.replace('.stl', '')}_${axis}_${layerThickness}mm_layers.zip`);
+      const svgContents = makerModels.map((model, i) => {
+        const svg = (makerjs as any).exporter.toSVG(model, {
+          strokeWidth: '0.1mm',
+          stroke: '#000000',
+          fill: 'none',
+        });
+        return {
+          layer: layers[i],
+          svg,
+          makerjsSVG: svg,
+        };
+      });
+      await exportSvgZip(
+        svgContents,
+        `${file.name.replace('.stl', '')}_${axis}_${layerThickness}mm_layers.zip`,
+        axis
+      );
     } catch (err) {
       setError('Failed to export layers');
       console.error(err);
     }
-  }, [file, layers]);
+  }, [file, layers, makerModels, axis, layerThickness]);
   
   // Add a new effect to ensure canvas size matches container
   useEffect(() => {

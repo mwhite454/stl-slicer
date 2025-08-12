@@ -27,7 +27,7 @@ export const DraggablePath = memo(function DraggablePath({ id, d, transform, sel
             focusable={false as any}
             transform={transform}
             pointerEvents="all"
-            style={{ cursor: isDragging ? 'grabbing' : 'grab', touchAction: 'none', outline: 'none', WebkitTapHighlightColor: 'transparent' as any, caretColor: 'transparent' as any }}
+            style={{ fill: 'blue', strokeWidth: 0.8, cursor: isDragging ? 'grabbing' : 'grab', touchAction: 'none', outline: 'none', WebkitTapHighlightColor: 'transparent' as any, caretColor: 'transparent' as any }}
             onMouseDown={(e) => {
                 // prevent focus ring/outline on click
                 e.preventDefault();
@@ -42,6 +42,7 @@ export const DraggablePath = memo(function DraggablePath({ id, d, transform, sel
             }}
         >
             {/* Base geometry */}
+            <text>{transform}</text>
             <path
                 focusable={false as any}
                 d={d}
@@ -58,7 +59,7 @@ export const DraggablePath = memo(function DraggablePath({ id, d, transform, sel
             {/* Selection highlight locked to same geometry & transform */}
             {selected && (
                 <path
-                    d={selectionD || d}
+                    d={ d}
                     fill="none"
                     stroke="#1e90ff"
                     strokeWidth={1.4}
