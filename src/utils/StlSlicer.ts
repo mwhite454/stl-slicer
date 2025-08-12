@@ -986,7 +986,7 @@ export class StlSlicer {
           ...options
         };
 
-        return (makerjs as any).exporter.toSVG(model, defaultOptions);
+        return makerjs.exporter.toSVG(model, defaultOptions);
       }
     } catch (error) {
       console.error('[StlSlicer] Error exporting maker.js model to SVG:', error);

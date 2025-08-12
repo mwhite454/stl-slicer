@@ -59,7 +59,7 @@ export const DraggablePath = memo(function DraggablePath({ id, d, transform, sel
             {/* Selection highlight locked to same geometry & transform */}
             {selected && (
                 <path
-                    d={ d}
+                    d={ selectionD || d }
                     fill="none"
                     stroke="#1e90ff"
                     strokeWidth={1.4}

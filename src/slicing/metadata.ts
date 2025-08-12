@@ -14,7 +14,7 @@ export function buildSliceLayerMetadata(
 } {
   const plane = planeFromAxis(axis);
   const axisMap = axisMapForPlane(plane);
-  const ext = (makerjs as any).measure.modelExtents(makerJsModel);
+  const ext = makerjs.measure.modelExtents(makerJsModel);
   const minU = ext?.low?.[0] ?? 0;
   const minV = ext?.low?.[1] ?? 0;
   const maxU = ext?.high?.[0] ?? 0;

@@ -312,7 +312,7 @@ function StlSlicerContent() {
     }
     try {
       const svgContents = makerModels.map((model, i) => {
-        const svg = (makerjs as any).exporter.toSVG(model, {
+        const svg = makerjs.exporter.toSVG(model, {
           strokeWidth: '0.1mm',
           stroke: '#000000',
           fill: 'none',

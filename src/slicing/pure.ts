@@ -48,7 +48,7 @@ export function pathsUVToMakerModel(paths: Array<Array<THREE.Vector2>>, layerInd
 }
 
 export function measureUVExtents(model: MakerJSModel): { minU: number; minV: number; maxU: number; maxV: number } {
-  const ext = (makerjs as any).measure.modelExtents(model);
+  const ext = makerjs.measure.modelExtents(model);
   if (!ext) return { minU: 0, minV: 0, maxU: 0, maxV: 0 };
   return { minU: ext.low[0], minV: ext.low[1], maxU: ext.high[0], maxV: ext.high[1] };
 }

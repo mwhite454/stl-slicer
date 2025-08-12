@@ -14,6 +14,7 @@ import { SelectionWrapper } from './SelectionWrapper';
 import { WorkspaceBorder } from './WorkspaceBorder';
 import { WorkspacePerfHud } from './WorkspacePerfHud';
 import { MAX_ZOOM, MIN_ZOOM, WHEEL_ZOOM_SENSITIVITY, GRID_LINE_STROKE, MIN_POSITION_MM, DIRECTION_KEY_MAP, NUDGE_MIN_MM, FIT_MARGIN_MM, BORDER_STROKE, MIN_SPEED_MULT } from './workspaceConstants';
+import { calculateRectangleBounds, calculateSliceLayerBounds, updateBounds, initializeBounds, applyMarginToBounds, calculateFitZoom, calculateCenterPan, calculateRectangleRenderProps, calculateSliceLayerRenderProps } from './workspaceDataHelpers';
 
 type DragOrigin = { id: string; x0: number; y0: number } | null;
 
@@ -278,7 +279,7 @@ export function WorkspaceStage({ visibleItemIds }: { visibleItemIds?: string[] }
       itemWidth = item.rect.width;
       itemHeight = item.rect.height;
     } else if (item.type === 'sliceLayer') {
-      const extRaw = (makerjs as any).measure.modelExtents(item.layer.makerJsModel);
+      const extRaw = makerjs.measure.modelExtents(item.layer.makerJsModel);
       if (extRaw) {
         const planeAware = Boolean(item.layer.plane);
         const metaExt = item.layer.uvExtents;
@@ -312,7 +313,7 @@ export function WorkspaceStage({ visibleItemIds }: { visibleItemIds?: string[] }
         const el = pathRefs.current.get(activeId);
         if (el) {
           if (item.type === 'sliceLayer') {
-            const extRaw = (makerjs as any).measure.modelExtents(item.layer.makerJsModel);
+            const extRaw = makerjs.measure.modelExtents(item.layer.makerJsModel);
             const planeAware = Boolean(item.layer.plane);
             const metaExt = item.layer.uvExtents;
             const minV = extRaw ? (metaExt?.minV ?? extRaw.low[1]) : 0;
@@ -378,7 +379,7 @@ export function WorkspaceStage({ visibleItemIds }: { visibleItemIds?: string[] }
       itemWidth = item.rect.width;
       itemHeight = item.rect.height;
     } else if (item.type === 'sliceLayer') {
-      const extRaw = (makerjs as any).measure.modelExtents(item.layer.makerJsModel);
+      const extRaw = makerjs.measure.modelExtents(item.layer.makerJsModel);
       if (extRaw) {
         const planeAware = Boolean(item.layer.plane);
         const metaExt = item.layer.uvExtents;
@@ -454,51 +455,26 @@ export function WorkspaceStage({ visibleItemIds }: { visibleItemIds?: string[] }
       setPan({ x: 0, y: 0 });
       return;
     }
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    for (const it of renderItems) {
-      if (it.type === 'rectangle') {
-        const x1 = it.position.x;
-        const y1 = it.position.y;
-        const x2 = it.position.x + it.rect.width;
-        const y2 = it.position.y + it.rect.height;
-        minX = Math.min(minX, x1); minY = Math.min(minY, y1);
-        maxX = Math.max(maxX, x2); maxY = Math.max(maxY, y2);
-      } else if (it.type === 'sliceLayer') {
-        const extRaw = (makerjs as any).measure.modelExtents(it.layer.makerJsModel);
-        if (extRaw) {
-          const planeAware = Boolean(it.layer.plane);
-          const metaExt = it.layer.uvExtents;
-          const minU = planeAware ? (metaExt?.minU ?? extRaw.low[0]) : extRaw.low[0];
-          const minV = planeAware ? (metaExt?.minV ?? extRaw.low[1]) : extRaw.low[1];
-          const maxU = planeAware ? (metaExt?.maxU ?? extRaw.high[0]) : extRaw.high[0];
-          const maxV = planeAware ? (metaExt?.maxV ?? extRaw.high[1]) : extRaw.high[1];
-          const w = Math.max(0, maxU - minU);
-          const h = Math.max(0, maxV - minV);
-          const x1 = it.position.x;
-          const y1 = it.position.y;
-          const x2 = x1 + w;
-          const y2 = y1 + h;
-          minX = Math.min(minX, x1); minY = Math.min(minY, y1);
-          maxX = Math.max(maxX, x2); maxY = Math.max(maxY, y2);
-        }
+    let bounds = initializeBounds();
+    for (const renderItem of renderItems) {
+      if (renderItem.type === 'rectangle') {
+        const itemBounds = calculateRectangleBounds(renderItem);
+        bounds = updateBounds(bounds, itemBounds);
+      } else if (renderItem.type === 'sliceLayer') {
+        const itemBounds = calculateSliceLayerBounds(renderItem);
+        bounds = updateBounds(bounds, itemBounds);
       }
     }
-    if (!Number.isFinite(minX)) {
+    if (!Number.isFinite(bounds.minX)) {
       setZoom(1);
       setPan({ x: 0, y: 0 });
       return;
     }
     // Add small margin (mm)
     const margin = FIT_MARGIN_MM;
-    minX -= margin; minY -= margin; maxX += margin; maxY += margin;
-    const rectW = Math.max(1, maxX - minX);
-    const rectH = Math.max(1, maxY - minY);
-    const scaleX = bounds.width / rectW;
-    const scaleY = bounds.height / rectH;
-    const targetZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.min(scaleX, scaleY)));
-    // Center the rect
-    const panX = (bounds.width - rectW * targetZoom) / 2 - minX * targetZoom;
-    const panY = (bounds.height - rectH * targetZoom) / 2 - minY * targetZoom;
+    const boundsWithMargin = applyMarginToBounds(bounds, margin);
+    const targetZoom = calculateFitZoom(boundsWithMargin, bounds.width, bounds.height, MIN_ZOOM, MAX_ZOOM);
+    const { x: panX, y: panY } = calculateCenterPan(boundsWithMargin, bounds.width, bounds.height, targetZoom);
     setZoom(targetZoom);
     setPan({ x: panX, y: panY });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -535,80 +511,58 @@ export function WorkspaceStage({ visibleItemIds }: { visibleItemIds?: string[] }
             {renderItems.map((it) => {
               const sel = selectedIds.includes(it.id);
               if (it.type === 'rectangle') {
-                const d = rectPathData(it.rect.width, it.rect.height);
-                const posX = activeId === it.id && dragPosMm ? dragPosMm.x : it.position.x;
-                const posY = activeId === it.id && dragPosMm ? dragPosMm.y : it.position.y;
-                // Expand selection overlay by a few screen pixels converted to mm for visibility
-                const mmpp = getMmPerPx();
-                const ox = selectionOverlayOffsetPx * mmpp.x;
-                const oy = selectionOverlayOffsetPx * mmpp.y;
-                const selX = posX - ox;
-                const selY = posY - oy;
-                const selW = it.rect.width + ox * 2;
-                const selH = it.rect.height + oy * 2;
+                const { draggablePathProps, selectionWrapperProps } = calculateRectangleRenderProps(
+                  it,
+                  activeId,
+                  dragPosMm,
+                  selectionOverlayOffsetPx,
+                  getMmPerPx,
+                  rectPathData,
+                  transformForMakerPath
+                );
+                
                 return (
                   <g key={it.id}>
                     <DraggablePath
-                      id={it.id}
-                      d={d}
-                      transform={transformForMakerPath(posX, posY, it.rect.height*-1)}
+                      {...draggablePathProps}
                       selected={sel}
                       setPathRef={setPathRef}
                       onClick={() => selectOnly(it.id)}
                     />
                     {sel && (
-                      <SelectionWrapper x={selX} y={selY} width={selW} height={selH} />
+                      <SelectionWrapper {...selectionWrapperProps} />
                     )}
                   </g>
                 );
               } else if (it.type === 'sliceLayer') {
-                const posX = activeId === it.id && dragPosMm ? dragPosMm.x : it.position.x;
-                const posY = activeId === it.id && dragPosMm ? dragPosMm.y : it.position.y;
-                const extRaw = (makerjs as any).measure.modelExtents(it.layer.makerJsModel);
-                if (!extRaw) return null;
-                const metaExt = it.layer.uvExtents;
-                const minU = metaExt?.minU ?? extRaw.low[0];
-                const minV = metaExt?.minV ?? extRaw.low[1];
-                const maxU = metaExt?.maxU ?? extRaw.high[0];
-                const maxV = metaExt?.maxV ?? extRaw.high[1];
-                const width = Math.max(0, maxU - minU);
-                const height = Math.max(0, maxV - minV);
-                // Use the same origin shift as before to normalize coordinates
-                const origin: [number, number] = [-minU, -maxV];
-                const d = (makerjs as any).exporter.toSVGPathData(it.layer.makerJsModel, { origin } as any) as unknown as string;
-
-                // Use SelectionWrapper with world-space coordinates
-                const mmpp = getMmPerPx();
-                const ox = selectionOverlayOffsetPx * mmpp.x;
-                const oy = selectionOverlayOffsetPx * mmpp.y;
+                const renderProps = calculateSliceLayerRenderProps(
+                  it,
+                  activeId,
+                  dragPosMm,
+                  selectionOverlayOffsetPx,
+                  getMmPerPx,
+                  transformForMakerPath
+                );
                 
-                // The transformForMakerPath adds height, but with origin [-minU, -maxV],
-                // the visual geometry ends up at approximately posY - height
-                // So we need to position the selection overlay there too
-                const selX = posX - ox;
-                const selY = posY - height - oy;  // Match where geometry visually appears
-                const selW = width + ox * 2;
-                const selH = height + oy * 2;
+                if (!renderProps) return null;
                 
-                // Use the same transform that works for rectangles
-                const transformStr = transformForMakerPath(posX, posY, height);
+                const { draggablePathProps, selectionWrapperProps, posX, posY, width, height } = renderProps;
+                
                 return (
                   <g key={it.id}>
                     <DraggablePath
-                      id={it.id}
-                      d={d}
-                      transform={transformStr}
+                      {...draggablePathProps}
                       selected={sel}
                       setPathRef={setPathRef}
                       onClick={() => selectOnly(it.id)}
                     />
                     {sel && (
                       <>
-                        <SelectionWrapper x={selX} y={selY} width={selW} height={selH} />
+                        <SelectionWrapper {...selectionWrapperProps} />
                         {/* Debug: show where we think the geometry should be */}
                         <rect 
                           x={posX} 
-                          y={posY} 
+                          y={posY - (height + (height/2))} 
                           width={width} 
                           height={height} 
                           fill="none" 
@@ -650,23 +604,48 @@ export function WorkspaceStage({ visibleItemIds }: { visibleItemIds?: string[] }
               </g>
             ))}
           </g>
-          
-          {/* Screen space debug info overlay */}
-          {debugClicks.length > 0 && (
-            <g transform="translate(10, 20)" pointerEvents="none">
-              <rect x="0" y="0" width="400" height={30 + debugClicks.length * 20} fill="white" opacity="0.9" stroke="purple" />
-              <text x="5" y="15" fontSize="12" fill="purple" fontWeight="bold" style={{ userSelect: 'text' }}>
-                Debug Clicks (Shift+Click to add, Shift+C to clear):
-              </text>
-              {debugClicks.map((click, i) => (
-                <text key={i} x="5" y={35 + i * 20} fontSize="11" fill="black" style={{ userSelect: 'text' }}>
-                  {click.label}: Screen({click.screen.x.toFixed(0)}, {click.screen.y.toFixed(0)}) → World({click.world.x.toFixed(1)}, {click.world.y.toFixed(1)})
-                </text>
-              ))}
-            </g>
-          )}
         </WorkspaceSvg>
       </DndContext>
+      {/* Screen space debug info overlay */}
+      {debugClicks.length > 0 && (
+        <Box
+          style={{
+            position: 'absolute',
+            top: 20,
+            left: 10,
+            width: 400,
+            backgroundColor: 'white',
+            opacity: 0.9,
+            border: '1px solid purple',
+            pointerEvents: 'none',
+            padding: 5,
+            zIndex: 1000
+          }}
+        >
+          <div style={{ 
+            fontSize: 12, 
+            color: 'purple', 
+            fontWeight: 'bold',
+            userSelect: 'text',
+            marginBottom: 5
+          }}>
+            Debug Clicks (Shift+Click to add, Shift+C to clear):
+          </div>
+          {debugClicks.map((click, i) => (
+            <div 
+              key={i} 
+              style={{ 
+                fontSize: 11, 
+                color: 'black', 
+                userSelect: 'text',
+                marginBottom: 3
+              }}
+            >
+              {click.label}: Screen({click.screen.x.toFixed(0)}, {click.screen.y.toFixed(0)}) → World({click.world.x.toFixed(1)}, {click.world.y.toFixed(1)})
+            </div>
+          ))}
+        </Box>
+      )}
       {showPerfHud && (
         <WorkspacePerfHud
           fps={fps}
@@ -680,4 +659,3 @@ export function WorkspaceStage({ visibleItemIds }: { visibleItemIds?: string[] }
     </Box>
   );
 }
-

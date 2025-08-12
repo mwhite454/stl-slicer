@@ -44,10 +44,10 @@ export const SelectionWrapper = React.memo(function SelectionWrapper({
         pointerEvents="none"
       />
       <text x={x} y={y} fill="black" fontSize={10}>{width.toFixed(2)} {height.toFixed(2)} {x.toFixed(2)} {y.toFixed(2)}</text>
-      {handles.map((h, idx) => (
-        <g key={idx} style={{ cursor: h.cursor }}>
-          <circle cx={h.x} cy={h.y} r={0.75} fill={stroke} />
-          <circle cx={h.x} cy={h.y} r={2} fill={stroke} fillOpacity={0} strokeOpacity={0} />
+      {handles.map((handle, handleIndex) => (
+        <g key={handleIndex} style={{ cursor: handle.cursor }}>
+          <circle cx={handle.x} cy={handle.y} r={0.75} fill={stroke} />
+          <circle cx={handle.x} cy={handle.y} r={2} fill={stroke} fillOpacity={0} strokeOpacity={0} />
         </g>
       ))}
     </g>
