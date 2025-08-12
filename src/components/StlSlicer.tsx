@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState, useRef } from 'react';
-import type { LayerData } from '../utils/StlSlicer';
+import type { LayerData } from '@/slicing/types';
 import { exportSvgZip } from '../utils/exportUtils';
 import { useWorkspaceStore } from '../stores/workspaceStore';
 import type { MakerJSModel } from '../lib/coords';

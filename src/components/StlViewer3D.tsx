@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
-import { Axis, LayerData } from '../utils/StlSlicer';
+import type { Axis, LayerData } from '@/slicing/types';
 import { Box, Group, Button, Alert, Paper, Text } from '@mantine/core';
 
 interface StlViewer3DProps {

@@ -2,7 +2,7 @@
 
 import { Box, Button, Group, Slider, Text } from "@mantine/core";
 import React from "react";
-import type { LayerData } from "../../utils/StlSlicer";
+import type { LayerData } from '@/slicing/types';
 
 export interface LayerNavigatorProps {
   layers: LayerData[];

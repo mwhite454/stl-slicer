@@ -3,7 +3,7 @@
 import { Box, Group, Text, Stack, Loader } from "@mantine/core";
 import dynamic from "next/dynamic";
 import React from "react";
-import type { Axis, LayerData } from "../../utils/StlSlicer";
+import type { Axis, LayerData } from '@/slicing/types';
 import { DesignWorkspace } from "../workspace/DesignWorkspace";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
 

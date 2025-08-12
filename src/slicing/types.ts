@@ -26,3 +26,10 @@ export type SlicerState = {
   geometry: THREE.BufferGeometry;
   boundingBox: THREE.Box3;
 };
+
+// Legacy LayerData type for backward compatibility
+export type LayerData = {
+  index: number;
+  paths: Array<Array<THREE.Vector2>>;
+  z: number;
+};

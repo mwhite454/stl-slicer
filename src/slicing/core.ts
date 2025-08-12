@@ -8,6 +8,95 @@ import type { Axis, SlicePlane, AxisMap, SlicerState } from './types';
 // Tolerance used for detecting valid line segments
 const SEG_EPS = 1e-6;
 
+/**
+ * LEGACY generateSVG function from StlSlicer.ts for reference
+ * This function has been replaced by makerjs.exporter.toSVG but preserved
+ * here for positioning reference and styling patterns.
+ * 
+ * Original function: StlSlicer.generateSVG(layer: LayerData): string
+ */
+/*
+function generateSVG(layer: LayerData): string {
+  if (!this.boundingBox) {
+    throw new Error('No model loaded');
+  }
+
+  const size = new THREE.Vector3();
+  this.boundingBox.getSize(size);
+
+  const width = Math.ceil(Math.max(size.x, size.y));
+  const height = Math.ceil(Math.max(size.x, size.y));
+  const categories = categorizePaths(layer.paths);
+  const textPath = textToSvgPath(layer.z.toString());
+
+  // Check if we have any valid paths
+  if (layer.paths.length === 0) {
+    console.warn(`[StlSlicer] No paths for layer ${layer.index} at z=${layer.z}`);
+    // Return an empty SVG with a message
+    return `<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg width="${width}mm" height="${height}mm" viewBox="0 0 ${width} ${height}" 
+     xmlns="http://www.w3.org/2000/svg">
+<g transform="translate(${width/2}, ${height/2})">
+      
+  <text x="0" y="0" text-anchor="middle" font-size="3" fill="red">
+    No slice data at this layer (${layer.z.toFixed(2)}mm)
+  </text>
+</g>
+</svg>`;
+  }
+
+  // SVG header
+  let svg = `<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg width="${width}mm" height="${height}mm" viewBox="0 0 ${width} ${height}" 
+     xmlns="http://www.w3.org/2000/svg">
+<g transform="translate(${width/2}, ${height/2})">
+        ${textPath}`;
+
+  // Add each path as a polyline
+  let pathCount = 0;
+  const {paths} = layer
+  
+  paths.forEach((path, index) => {
+    const isExternal = categories[index] === "external";
+    if(isExternal){
+      // External path handling
+      const pathData = path.map((point, pointIndex) => 
+        `${pointIndex === 0 ? 'M' : 'L'}${point.x.toFixed(3)},${point.y.toFixed(3)}`
+      ).join(' ') + 'Z';
+      
+      svg += `\n<path d="${pathData}" fill="none" id="layer-${layer.index}-external" stroke="blue" stroke-width="0.3" />\n`;
+      pathCount++;
+    }
+
+    const pathColor = categories[index] === "external" ? "red" : "black"
+    const pathWeight = categories[index] === "external" ? "0.3" : "0.1"
+    // Skip paths with less than 3 points (they can't form proper polygons)
+    if (path.length >= 3) {
+    // No need to check if closed - we already ensured this in buildPaths
+    const pathData = path.map((point:any, index:any) => `${index === 0 ? 'M' : 'L'}${point.x.toFixed(3)},${point.y.toFixed(3)}`)
+                          .join(' ') + 'Z';
+
+    svg += `\n<path d="${pathData}" fill="none" stroke="${pathColor}" stroke-width="${pathWeight}" />\n`;
+    pathCount++;
+    }
+  })
+
+  if (pathCount === 0) {
+    svg += `
+        <text x="0" y="0" text-anchor="middle" font-size="3" fill="red">
+          All paths were invalid for this layer
+        </text>`;
+  }
+
+  // SVG footer
+  svg += `
+    </g>
+    </svg>`;
+
+  return svg;
+}
+*/
+
 export async function parseStl(file: File): Promise<SlicerState> {
   const loader = new STLLoader();
   const arrayBuffer = await file.arrayBuffer();

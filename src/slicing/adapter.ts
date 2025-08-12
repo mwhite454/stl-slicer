@@ -1,8 +1,7 @@
 import type { MakerJSModel } from '@/lib/coords';
-import { StlSlicer, type Axis as ClassAxis, type LayerData as ClassLayerData } from '@/utils/StlSlicer';
+import { parseStl, sliceGeometry } from './core';
 import { buildSliceLayerMetadata } from './metadata';
-
-export type Axis = 'x' | 'y' | 'z';
+import type { Axis } from './types';
 
 export async function sliceToMakerModels(
   file: File,
@@ -21,23 +20,27 @@ export async function sliceToMakerModels(
     uvExtents: { minU: number; minV: number; maxU: number; maxV: number };
   }>;
 }> {
-  const slicer = new StlSlicer();
-  await slicer.loadSTL(file);
-  const layers2D: ClassLayerData[] = slicer.sliceModel(axis as ClassAxis, layerThickness);
-  const makerJsModels = slicer.generateMakerJSModels(layers2D);
-  const layers = layers2D.map((layer, idx) => {
+  // Parse STL file using functional pipeline
+  const slicerState = await parseStl(file);
+  
+  // Slice geometry using functional pipeline
+  const { makerJsModels, layers } = sliceGeometry(slicerState, axis, layerThickness);
+  
+  // Build metadata for each layer
+  const enrichedLayers = layers.map((layer, idx) => {
     const model = makerJsModels[idx];
     const meta = buildSliceLayerMetadata(axis, model);
     return {
-      layerIndex: layer.index,
-      zCoordinate: layer.z,
+      layerIndex: layer.layerIndex,
+      zCoordinate: layer.zCoordinate,
       axis,
       layerThickness,
       plane: meta.plane,
       axisMap: meta.axisMap,
       vUpSign: meta.vUpSign,
-      uvExtents: meta.uvExtents,
+      uvExtents: layer.uvExtents,
     };
   });
-  return { makerJsModels, layers };
+  
+  return { makerJsModels, layers: enrichedLayers };
 }

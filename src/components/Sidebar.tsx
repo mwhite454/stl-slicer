@@ -1,5 +1,5 @@
 import React from 'react';
-import { Axis } from '../utils/StlSlicer';
+import type { Axis } from '@/slicing/types';
 import {
   Box,
   Stack,
