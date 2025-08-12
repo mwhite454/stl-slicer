@@ -6,6 +6,7 @@ import { useElementSize } from '@mantine/hooks';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { rectPathData } from '@/lib/maker/generateSvgPath';
 import { transformForMakerPath } from '@/lib/coords';
+import makerjs from 'makerjs';
 import { DndContext, DragEndEvent, DragMoveEvent, DragStartEvent, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { WorkspaceSvg } from '@/components/workspace/WorkspaceSvg';
 import { DraggablePath } from './DraggablePath';
@@ -13,10 +14,11 @@ import { SelectionWrapper } from './SelectionWrapper';
 import { WorkspaceBorder } from './WorkspaceBorder';
 import { WorkspacePerfHud } from './WorkspacePerfHud';
 import { MAX_ZOOM, MIN_ZOOM, WHEEL_ZOOM_SENSITIVITY, GRID_LINE_STROKE, MIN_POSITION_MM, DIRECTION_KEY_MAP, NUDGE_MIN_MM, FIT_MARGIN_MM, BORDER_STROKE, MIN_SPEED_MULT } from './workspaceConstants';
+import { calculateRectangleBounds, calculateSliceLayerBounds, updateBounds, initializeBounds, applyMarginToBounds, calculateFitZoom, calculateCenterPan, calculateRectangleRenderProps, calculateSliceLayerRenderProps } from './workspaceDataHelpers';
 
 type DragOrigin = { id: string; x0: number; y0: number } | null;
 
-export function WorkspaceStage() {
+export function WorkspaceStage({ visibleItemIds }: { visibleItemIds?: string[] }) {
   const bounds = useWorkspaceStore((s) => s.bounds);
   const grid = useWorkspaceStore((s) => s.grid);
   const viewport = useWorkspaceStore((s) => s.viewport);
@@ -51,12 +53,43 @@ export function WorkspaceStage() {
   const dragOriginRef = useRef<DragOrigin>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [dragPosMm, setDragPosMm] = useState<{ x: number; y: number } | null>(null);
-  // Imperative path refs for high-FPS drag updates without React re-renders
-  const pathRefs = useRef<Map<string, SVGPathElement>>(new Map());
-  const setPathRef = (id: string, el: SVGPathElement | null) => {
+  // Debug: Track click positions
+  const [debugClicks, setDebugClicks] = useState<Array<{ 
+    screen: { x: number; y: number };
+    world: { x: number; y: number };
+    label: string;
+  }>>([]);
+  // Imperative group refs for high-FPS drag updates without React re-renders
+  const pathRefs = useRef<Map<string, SVGGraphicsElement>>(new Map());
+  const setPathRef = (id: string, el: SVGGraphicsElement | null) => {
     if (el) pathRefs.current.set(id, el);
     else pathRefs.current.delete(id);
   };
+
+  // Debug toggles removed after finalizing plane-aware transform/origin pairing
+
+  // Selected item JSON for Perf HUD (prettified)
+  const selectedItemJson = useMemo(() => {
+    const id = selectedIds[0];
+    if (!id) return null;
+    const it = items.find((x) => x.id === id);
+    if (!it) return null;
+    try {
+      return JSON.stringify(it, null, 2);
+    } catch (_e) {
+      return null;
+    }
+  }, [selectedIds, items]);
+
+  // Removed metrics debug effect after alignment finalized
+
+  // Filter items to render, if a visibility list is provided
+  const renderItems = useMemo(() => {
+    if (!visibleItemIds) return items; // default: render all
+    if (visibleItemIds.length === 0) return [] as typeof items; // explicitly none
+    const set = new Set(visibleItemIds);
+    return items.filter((it) => set.has(it.id));
+  }, [items, visibleItemIds]);
 
   // Map client (px) to workspace mm using current group CTM
   const clientToMm = (clientX: number, clientY: number) => {
@@ -70,33 +103,40 @@ export function WorkspaceStage() {
     if (!m) return null;
     const inv = m.inverse();
     const p = pt.matrixTransform(inv as any);
-    return { x: p.x, y: p.y };
+    // Round to 0.1mm precision to eliminate micro-differences from floating point calculations
+    const precision = 0.1;
+    return { 
+      x: Math.round(p.x / precision) * precision, 
+      y: Math.round(p.y / precision) * precision 
+    };
   };
 
-  const onWheel = (e: React.WheelEvent<SVGSVGElement>) => {
-    // Zoom anchored at cursor
-    e.preventDefault();
-    const svg = svgRef.current as unknown as SVGSVGElement | null;
-    const g = contentGroupRef.current;
-    if (!svg || !g) return;
-    const pt = svg.createSVGPoint();
-    pt.x = e.clientX;
-    pt.y = e.clientY;
-    const ctm = g.getScreenCTM();
-    if (!ctm) return;
-    const p = pt.matrixTransform(ctm.inverse());
-    const delta = -e.deltaY * Math.max(MIN_SPEED_MULT, zoomSpeedMultiplier); // natural: scroll up to zoom in
-    const scale = Math.exp(delta * WHEEL_ZOOM_SENSITIVITY);
-    const nextZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, viewport.zoom * scale));
-    const applied = nextZoom / viewport.zoom;
-    // Keep cursor point stable: adjust pan so p maps to same screen position
-    const newPan = {
-      x: p.x - (p.x - viewport.pan.x) * applied,
-      y: p.y - (p.y - viewport.pan.y) * applied,
-    };
-    setZoom(nextZoom);
-    setPan(newPan);
+  // Debug: Handle click for coordinate debugging
+  const handleDebugClick = (e: React.MouseEvent) => {
+    if (!e.shiftKey) return; // Only capture with Shift+Click
+    
+    const rect = (e.currentTarget as SVGElement).getBoundingClientRect();
+    const screenX = e.clientX - rect.left;
+    const screenY = e.clientY - rect.top;
+    const worldPos = clientToMm(e.clientX, e.clientY);
+    
+    if (worldPos) {
+      const clickNumber = debugClicks.length + 1;
+      const label = `Click ${clickNumber}`;
+      setDebugClicks(prev => [...prev, {
+        screen: { x: screenX, y: screenY },
+        world: worldPos,
+        label
+      }]);
+      console.log(`Debug ${label}:`, {
+        screen: { x: screenX.toFixed(1), y: screenY.toFixed(1) },
+        world: { x: worldPos.x.toFixed(2), y: worldPos.y.toFixed(2) }
+      });
+    }
   };
+
+  // onWheel handler removed - now handled by non-passive listener in useEffect below
+  // to avoid "Unable to preventDefault inside passive event listener" errors
 
   const onPointerDown = (e: React.PointerEvent<SVGSVGElement>) => {
     if (e.button === 1) {
@@ -233,13 +273,35 @@ export function WorkspaceStage() {
     let nx = x0 + dxMm;
     let ny = y0 + dyMm;
     // Clamp within bounds (ensuring item stays fully inside)
-    const itemWidth = item.type === 'rectangle' ? item.rect.width : 100; // Placeholder width for sliceLayer
-    const itemHeight = item.type === 'rectangle' ? item.rect.height : 100; // Placeholder height for sliceLayer
+    let itemWidth = 100;
+    let itemHeight = 100;
+    if (item.type === 'rectangle') {
+      itemWidth = item.rect.width;
+      itemHeight = item.rect.height;
+    } else if (item.type === 'sliceLayer') {
+      const extRaw = makerjs.measure.modelExtents(item.layer.makerJsModel);
+      if (extRaw) {
+        const planeAware = Boolean(item.layer.plane);
+        const metaExt = item.layer.uvExtents;
+        const minU = planeAware ? (metaExt?.minU ?? extRaw.low[0]) : extRaw.low[0];
+        const minV = planeAware ? (metaExt?.minV ?? extRaw.low[1]) : extRaw.low[1];
+        const maxU = planeAware ? (metaExt?.maxU ?? extRaw.high[0]) : extRaw.high[0];
+        const maxV = planeAware ? (metaExt?.maxV ?? extRaw.high[1]) : extRaw.high[1];
+        itemWidth = Math.max(0, maxU - minU);
+        itemHeight = Math.max(0, maxV - minV);
+      }
+    }
     nx = Math.max(MIN_POSITION_MM, Math.min(bounds.width - itemWidth, nx));
     ny = Math.max(MIN_POSITION_MM, Math.min(bounds.height - itemHeight, ny));
     if (grid.snap && grid.size > 0) {
       nx = Math.round(nx / grid.size) * grid.size;
       ny = Math.round(ny / grid.size) * grid.size;
+    } else {
+      // Apply 0.1mm precision rounding even when not snapping to grid
+      // This eliminates floating-point micro-differences
+      const precision = 0.1;
+      nx = Math.round(nx / precision) * precision;
+      ny = Math.round(ny / precision) * precision;
     }
     // Schedule an imperative transform update via RAF for smoothness
     dragPendingRef.current = { x: nx, y: ny };
@@ -250,8 +312,19 @@ export function WorkspaceStage() {
         if (!pending || !activeId) return;
         const el = pathRefs.current.get(activeId);
         if (el) {
-          const itemHeight = item.type === 'rectangle' ? item.rect.height : 100; // Placeholder height for sliceLayer 
-          el.setAttribute('transform', transformForMakerPath(pending.x, pending.y, itemHeight));
+          if (item.type === 'sliceLayer') {
+            const extRaw = makerjs.measure.modelExtents(item.layer.makerJsModel);
+            const planeAware = Boolean(item.layer.plane);
+            const metaExt = item.layer.uvExtents;
+            const minV = extRaw ? (metaExt?.minV ?? extRaw.low[1]) : 0;
+            const maxV = extRaw ? (metaExt?.maxV ?? extRaw.high[1]) : 0;
+            const ih = Math.max(0, maxV - minV);
+            const t = transformForMakerPath(pending.x, pending.y, ih);
+            el.setAttribute('transform', t);
+          } else {
+            const ih = item.rect.height;
+            el.setAttribute('transform', transformForMakerPath(pending.x, pending.y, ih));
+          }
         }
       });
     }
@@ -273,14 +346,22 @@ export function WorkspaceStage() {
     setDragPosMm(null);
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    // Nudge selected item(s) with arrow keys
-    const id = selectedIds[0];
-    if (!id) return;
-    const dir = DIRECTION_KEY_MAP[e.key];
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    const key = e.key;
+    // Clear debug clicks with 'C' key (uppercase) or 'c' with shift
+    if ((key === 'C' || key === 'c') && e.shiftKey) {
+      e.preventDefault();
+      e.stopPropagation();
+      setDebugClicks([]);
+      console.log('Debug clicks cleared');
+      return;
+    }
+    const dir = DIRECTION_KEY_MAP[key];
     if (!dir) return;
     const { dx, dy } = dir;
     e.preventDefault();
+    const id = selectedIds[0];
+    if (!id) return;
     const item = items.find((it) => it.id === id);
     if (!item) return;
     // Use grid size when holding Shift, otherwise configurable nudge distance in mm
@@ -292,12 +373,60 @@ export function WorkspaceStage() {
       nx = Math.round(nx / grid.size) * grid.size;
       ny = Math.round(ny / grid.size) * grid.size;
     }
-    const itemWidth = item.type === 'rectangle' ? item.rect.width : 100; // Placeholder width for sliceLayer
-    const itemHeight = item.type === 'rectangle' ? item.rect.height : 100; // Placeholder height for sliceLayer
+    let itemWidth = 100;
+    let itemHeight = 100;
+    if (item.type === 'rectangle') {
+      itemWidth = item.rect.width;
+      itemHeight = item.rect.height;
+    } else if (item.type === 'sliceLayer') {
+      const extRaw = makerjs.measure.modelExtents(item.layer.makerJsModel);
+      if (extRaw) {
+        const planeAware = Boolean(item.layer.plane);
+        const metaExt = item.layer.uvExtents;
+        const minU = planeAware ? (metaExt?.minU ?? extRaw.low[0]) : extRaw.low[0];
+        const minV = planeAware ? (metaExt?.minV ?? extRaw.low[1]) : extRaw.low[1];
+        const maxU = planeAware ? (metaExt?.maxU ?? extRaw.high[0]) : extRaw.high[0];
+        const maxV = planeAware ? (metaExt?.maxV ?? extRaw.high[1]) : extRaw.high[1];
+        itemWidth = Math.max(0, maxU - minU);
+        itemHeight = Math.max(0, maxV - minV);
+      }
+    }
     nx = Math.max(0, Math.min(bounds.width - itemWidth, nx));
     ny = Math.max(0, Math.min(bounds.height - itemHeight, ny));
     updateItemPosition(id, nx, ny);
   };
+
+  // Add non-passive wheel event listener to prevent passive event warnings
+  useEffect(() => {
+    const svg = svgRef.current as unknown as SVGSVGElement | null;
+    if (!svg) return;
+    
+    const handleWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const g = contentGroupRef.current;
+      if (!g) return;
+      const pt = svg.createSVGPoint();
+      pt.x = e.clientX;
+      pt.y = e.clientY;
+      const ctm = g.getScreenCTM();
+      if (!ctm) return;
+      const p = pt.matrixTransform(ctm.inverse());
+      const delta = -e.deltaY * Math.max(MIN_SPEED_MULT, zoomSpeedMultiplier);
+      const scale = Math.exp(delta * WHEEL_ZOOM_SENSITIVITY);
+      const nextZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, viewport.zoom * scale));
+      const applied = nextZoom / viewport.zoom;
+      const newPan = {
+        x: p.x - (p.x - viewport.pan.x) * applied,
+        y: p.y - (p.y - viewport.pan.y) * applied,
+      };
+      setZoom(nextZoom);
+      setPan(newPan);
+    };
+    
+    // Add as non-passive to allow preventDefault
+    svg.addEventListener('wheel', handleWheel, { passive: false });
+    return () => svg.removeEventListener('wheel', handleWheel);
+  }, [viewport.zoom, viewport.pan, zoomSpeedMultiplier, setZoom, setPan]);
 
   useEffect(() => {
     if (!showPerfHud) return;
@@ -321,38 +450,31 @@ export function WorkspaceStage() {
 
   useEffect(() => {
     if (!fitToBoundsRequestId) return;
-    if (!items.length) {
+    if (!renderItems.length) {
       setZoom(1);
       setPan({ x: 0, y: 0 });
       return;
     }
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    for (const it of items) {
-      if (it.type === 'rectangle') {
-        const x1 = it.position.x;
-        const y1 = it.position.y;
-        const x2 = it.position.x + it.rect.width;
-        const y2 = it.position.y + it.rect.height;
-        minX = Math.min(minX, x1); minY = Math.min(minY, y1);
-        maxX = Math.max(maxX, x2); maxY = Math.max(maxY, y2);
+    let bounds = initializeBounds();
+    for (const renderItem of renderItems) {
+      if (renderItem.type === 'rectangle') {
+        const itemBounds = calculateRectangleBounds(renderItem);
+        bounds = updateBounds(bounds, itemBounds);
+      } else if (renderItem.type === 'sliceLayer') {
+        const itemBounds = calculateSliceLayerBounds(renderItem);
+        bounds = updateBounds(bounds, itemBounds);
       }
     }
-    if (!Number.isFinite(minX)) {
+    if (!Number.isFinite(bounds.minX)) {
       setZoom(1);
       setPan({ x: 0, y: 0 });
       return;
     }
     // Add small margin (mm)
     const margin = FIT_MARGIN_MM;
-    minX -= margin; minY -= margin; maxX += margin; maxY += margin;
-    const rectW = Math.max(1, maxX - minX);
-    const rectH = Math.max(1, maxY - minY);
-    const scaleX = bounds.width / rectW;
-    const scaleY = bounds.height / rectH;
-    const targetZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.min(scaleX, scaleY)));
-    // Center the rect
-    const panX = (bounds.width - rectW * targetZoom) / 2 - minX * targetZoom;
-    const panY = (bounds.height - rectH * targetZoom) / 2 - minY * targetZoom;
+    const boundsWithMargin = applyMarginToBounds(bounds, margin);
+    const targetZoom = calculateFitZoom(boundsWithMargin, bounds.width, bounds.height, MIN_ZOOM, MAX_ZOOM);
+    const { x: panX, y: panY } = calculateCenterPan(boundsWithMargin, bounds.width, bounds.height, targetZoom);
     setZoom(targetZoom);
     setPan({ x: panX, y: panY });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -370,10 +492,11 @@ export function WorkspaceStage() {
           bounds={bounds}
           isPanning={isPanning}
           onClearSelection={() => selectOnly(null)}
-          onWheel={onWheel}
+          // onWheel removed - handled by non-passive listener in useEffect
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
+          onClick={handleDebugClick}
         >
           
           {/* Pan/Zoom group in mm */}
@@ -385,63 +508,144 @@ export function WorkspaceStage() {
             <WorkspaceBorder width={bounds.width} height={bounds.height} />
 
             {/* Items */}
-            {items.map((it) => {
+            {renderItems.map((it) => {
               const sel = selectedIds.includes(it.id);
               if (it.type === 'rectangle') {
-                const d = rectPathData(it.rect.width, it.rect.height);
-                const posX = activeId === it.id && dragPosMm ? dragPosMm.x : it.position.x;
-                const posY = activeId === it.id && dragPosMm ? dragPosMm.y : it.position.y;
-                // Expand selection overlay by a few screen pixels converted to mm for visibility
-                const mmpp = getMmPerPx();
-                const ox = selectionOverlayOffsetPx * mmpp.x;
-                const oy = selectionOverlayOffsetPx * mmpp.y;
-                const selX = posX - ox;
-                const selY = posY - oy;
-                const selW = it.rect.width + ox * 2;
-                const selH = it.rect.height + oy * 2;
+                const { draggablePathProps, selectionWrapperProps } = calculateRectangleRenderProps(
+                  it,
+                  activeId,
+                  dragPosMm,
+                  selectionOverlayOffsetPx,
+                  getMmPerPx,
+                  rectPathData,
+                  transformForMakerPath
+                );
+                
                 return (
                   <g key={it.id}>
                     <DraggablePath
-                      id={it.id}
-                      d={d}
-                      transform={transformForMakerPath(posX, posY, it.rect.height)}
+                      {...draggablePathProps}
                       selected={sel}
                       setPathRef={setPathRef}
                       onClick={() => selectOnly(it.id)}
                     />
                     {sel && (
-                      <SelectionWrapper x={selX} y={selY} width={selW} height={selH} />
+                      <SelectionWrapper {...selectionWrapperProps} />
                     )}
                   </g>
                 );
               } else if (it.type === 'sliceLayer') {
-                // For sliceLayer items, we'll need to convert the maker.js model to SVG paths
-                // This is a placeholder implementation - we'll need to implement the actual conversion
-                const posX = activeId === it.id && dragPosMm ? dragPosMm.x : it.position.x;
-                const posY = activeId === it.id && dragPosMm ? dragPosMm.y : it.position.y;
-                // TODO: Convert maker.js model to SVG paths
-                // For now, we'll just render a placeholder rectangle
-                const width = 100; // Placeholder width
-                const height = 100; // Placeholder height
-                const d = rectPathData(width, height);
+                const renderProps = calculateSliceLayerRenderProps(
+                  it,
+                  activeId,
+                  dragPosMm,
+                  selectionOverlayOffsetPx,
+                  getMmPerPx,
+                  transformForMakerPath
+                );
+                
+                if (!renderProps) return null;
+                
+                const { draggablePathProps, selectionWrapperProps, posX, posY, width, height } = renderProps;
+                
                 return (
                   <g key={it.id}>
                     <DraggablePath
-                      id={it.id}
-                      d={d}
-                      transform={transformForMakerPath(posX, posY, height)}
+                      {...draggablePathProps}
                       selected={sel}
                       setPathRef={setPathRef}
                       onClick={() => selectOnly(it.id)}
                     />
+                    {sel && (
+                      <>
+                        <SelectionWrapper {...selectionWrapperProps} />
+                        {/* Debug: show where we think the geometry should be */}
+                        <rect 
+                          x={posX} 
+                          y={posY - (height + (height/2))} 
+                          width={width} 
+                          height={height} 
+                          fill="none" 
+                          stroke="lime" 
+                          strokeWidth="2" 
+                          strokeDasharray="5,5"
+                          opacity="0.7"
+                        />
+                        <text x={posX + 5} y={posY - 5} fontSize="12" fill="lime">{posX.toFixed(1)}, {posY.toFixed(1)}</text>
+                      </>
+                    )}
                   </g>
                 );
               }
               return null;
             })}
+            
+            {/* Debug click markers */}
+            {debugClicks.map((click, i) => (
+              <g key={i} pointerEvents="none">
+                {/* World space marker */}
+                <circle 
+                  cx={click.world.x} 
+                  cy={click.world.y} 
+                  r="3" 
+                  fill="purple" 
+                  opacity="0.8" 
+                />
+                <text 
+                  x={click.world.x + 5} 
+                  y={click.world.y - 5} 
+                  fontSize="12" 
+                  fill="purple"
+                  fontWeight="bold"
+                  style={{ userSelect: 'text' }}
+                >
+                  {click.label} (World: {click.world.x.toFixed(1)}, {click.world.y.toFixed(1)})
+                </text>
+              </g>
+            ))}
           </g>
         </WorkspaceSvg>
       </DndContext>
+      {/* Screen space debug info overlay */}
+      {debugClicks.length > 0 && (
+        <Box
+          style={{
+            position: 'absolute',
+            top: 20,
+            left: 10,
+            width: 400,
+            backgroundColor: 'white',
+            opacity: 0.9,
+            border: '1px solid purple',
+            pointerEvents: 'none',
+            padding: 5,
+            zIndex: 1000
+          }}
+        >
+          <div style={{ 
+            fontSize: 12, 
+            color: 'purple', 
+            fontWeight: 'bold',
+            userSelect: 'text',
+            marginBottom: 5
+          }}>
+            Debug Clicks (Shift+Click to add, Shift+C to clear):
+          </div>
+          {debugClicks.map((click, i) => (
+            <div 
+              key={i} 
+              style={{ 
+                fontSize: 11, 
+                color: 'black', 
+                userSelect: 'text',
+                marginBottom: 3
+              }}
+            >
+              {click.label}: Screen({click.screen.x.toFixed(0)}, {click.screen.y.toFixed(0)}) → World({click.world.x.toFixed(1)}, {click.world.y.toFixed(1)})
+            </div>
+          ))}
+        </Box>
+      )}
       {showPerfHud && (
         <WorkspacePerfHud
           fps={fps}
@@ -449,10 +653,9 @@ export function WorkspaceStage() {
           selectedCount={selectedIds.length}
           zoom={viewport.zoom}
           pan={viewport.pan}
+          selectedItemJson={selectedItemJson}
         />
       )}
     </Box>
   );
 }
-
-

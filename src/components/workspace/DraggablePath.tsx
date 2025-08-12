@@ -8,20 +8,26 @@ type DraggablePathProps = {
     transform: string;
     selected: boolean;
     onClick: () => void;
-    setPathRef: (id: string, el: SVGPathElement | null) => void;
+    setPathRef: (id: string, el: SVGGraphicsElement | null) => void;
+    selectionD?: string;
 };
-export const DraggablePath = memo(function DraggablePath({ id, d, transform, selected, onClick, setPathRef }: DraggablePathProps) {
+export const DraggablePath = memo(function DraggablePath({ id, d, transform, selected, onClick, setPathRef, selectionD }: DraggablePathProps) {
     const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id });
-    const groupRef = setNodeRef as unknown as (node: SVGGElement | null) => void;
+    const handleGroupRef = (node: SVGGElement | null) => {
+        setNodeRef(node as unknown as HTMLElement | null);
+        setPathRef(id, node as unknown as SVGGraphicsElement | null);
+    };
     return (
         <g
-            ref={groupRef}
+            ref={handleGroupRef}
             {...listeners}
+            {...attributes}
             role={undefined as any}
             tabIndex={-1}
             focusable={false as any}
+            transform={transform}
             pointerEvents="all"
-            style={{ cursor: isDragging ? 'grabbing' : 'grab', touchAction: 'none', outline: 'none', WebkitTapHighlightColor: 'transparent' as any, caretColor: 'transparent' as any }}
+            style={{ fill: 'blue', strokeWidth: 0.8, cursor: isDragging ? 'grabbing' : 'grab', touchAction: 'none', outline: 'none', WebkitTapHighlightColor: 'transparent' as any, caretColor: 'transparent' as any }}
             onMouseDown={(e) => {
                 // prevent focus ring/outline on click
                 e.preventDefault();
@@ -35,11 +41,11 @@ export const DraggablePath = memo(function DraggablePath({ id, d, transform, sel
                 onClick();
             }}
         >
+            {/* Base geometry */}
+            <text>{transform}</text>
             <path
-                ref={(el) => setPathRef(id, el)}
                 focusable={false as any}
                 d={d}
-                transform={transform}
                 fill="transparent"
                 stroke="#222"
                 strokeWidth={0.8}
@@ -50,6 +56,20 @@ export const DraggablePath = memo(function DraggablePath({ id, d, transform, sel
                 onFocus={(e) => {
                     (e.currentTarget as any)?.blur?.();
                 }} />
+            {/* Selection highlight locked to same geometry & transform */}
+            {selected && (
+                <path
+                    d={ selectionD || d }
+                    fill="none"
+                    stroke="#1e90ff"
+                    strokeWidth={1.4}
+                    strokeLinejoin="round"
+                    strokeLinecap="round"
+                    vectorEffect="non-scaling-stroke"
+                    pointerEvents="none"
+                    strokeDasharray="3 2"
+                />
+            )}
         </g>
     );
 });

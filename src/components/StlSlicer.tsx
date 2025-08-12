@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState, useRef } from 'react';
-import { StlSlicer as StlSlicerUtil, Axis, LayerData } from '../utils/StlSlicer';
+import type { LayerData } from '@/slicing/types';
 import { exportSvgZip } from '../utils/exportUtils';
 import { useWorkspaceStore } from '../stores/workspaceStore';
 import type { MakerJSModel } from '../lib/coords';
@@ -12,22 +12,13 @@ import { Sidebar } from './Sidebar';
 import {  useSVGStore } from '@/stores/svgStore';
 import { useViewerStore } from '@/stores/viewerStore';   
 import { useSTLStore } from '@/stores/stlStore';
-import { Box, Flex, Text, Alert, Group, Stack, Title, ActionIcon, Loader, Slider, Button } from '@mantine/core';
-
-// Improved dynamic import to avoid chunk loading errors
-const StlViewer3D = dynamic(
-  () => import('./StlViewer3D').then(mod => mod.default), 
-  {
-    loading: () => (
-      <Box w="100%" h={400} style={{ border: '1px solid #e9ecef', borderRadius: '8px', backgroundColor: '#f8f9fa', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <Stack align="center" gap="sm">
-          <Loader size="md" />
-          <Text size="sm">Loading 3D Viewer...</Text>
-        </Stack>
-      </Box>
-    ),
-  }
-);
+import { Box, Flex, Text, Alert, Stack, Loader } from '@mantine/core';
+import { ViewModePanel } from './slicer/ViewModePanel';
+import { LayerNavigator } from './slicer/LayerNavigator';
+import { ClearSessionButton } from './slicer/ClearSessionButton';
+import makerjs from 'makerjs';
+import { parseStl, getDimensions as getSlicerDimensions, sliceGeometry } from '@/slicing/core';
+import type { Axis, SlicerState } from '@/slicing/types';
 
 // Convert File to base64
 const fileToBase64 = (file: File): Promise<string> =>
@@ -60,12 +51,8 @@ function StlSlicerContent() {
   const previewLayerRestored = useRef(false);
   
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const slicerRef = useRef<StlSlicerUtil | null>(null);
-  
-  // Initialize the slicer
-  useEffect(() => {
-    slicerRef.current = new StlSlicerUtil();
-  }, []);
+  const [slicerState, setSlicerState] = useState<SlicerState | null>(null);
+  const [makerModels, setMakerModels] = useState<MakerJSModel[]>([]);
   
 
   
@@ -140,17 +127,11 @@ function StlSlicerContent() {
     } catch (err) {
       console.error('Failed to save STL file to localStorage', err);
     }
-    
     try {
-      if (!slicerRef.current) {
-        slicerRef.current = new StlSlicerUtil();
-      }
-      
-      await slicerRef.current.loadSTL(selectedFile);
-      const dims = slicerRef.current.getDimensions();
-      if (dims) {
-        setDimensions(dims);
-      }
+      const state = await parseStl(selectedFile);
+      setSlicerState(state);
+      const dims = getSlicerDimensions(state);
+      setDimensions(dims);
     } catch (err) {
       setError('Failed to load STL file. Please check the file format.');
       console.error(err);
@@ -168,9 +149,7 @@ function StlSlicerContent() {
   
   // Auto-slice on file load, axis, or thickness change
   useEffect(() => {
-    if (!slicerRef.current || !file) return;
-    // Check if model is actually loaded before attempting to slice
-    if (!slicerRef.current.isModelLoaded()) return;
+    if (!slicerState || !file) return;
     
     let cancelled = false;
     const doSlice = async () => {
@@ -178,41 +157,39 @@ function StlSlicerContent() {
       setError(null);
       setHasAutoFit(false);
       try {
-        const slicedLayers = slicerRef.current!.sliceModel(axis, layerThickness);
+        const { makerJsModels, layers: metaLayers } = sliceGeometry(slicerState, axis, layerThickness);
         if (cancelled) return;
-        setLayers(slicedLayers);
-        const midIdx = getMiddleNonEmptyLayerIndex(slicedLayers);
+        setMakerModels(makerJsModels);
+        // Map to legacy LayerData shape for UI components that only need z/index
+        const legacyLayers: LayerData[] = metaLayers.map((m) => ({ index: m.layerIndex, z: m.zCoordinate, paths: [] }));
+        setLayers(legacyLayers);
+        const midIdx = Math.floor(metaLayers.length / 2);
         setPreviewLayerIndex(midIdx);
         localStorage.setItem('slicerPreviewLayerIndex', String(midIdx));
-        
-        // NEW: Export sliced layers to workspace store
-        // Generate maker.js models for all layers
-        const makerJsModels = slicerRef.current!.generateMakerJSModels(slicedLayers);
-        
-        // Get the workspace store actions
+
+        // Push layers to workspace store with full metadata
         const workspaceStore = useWorkspaceStore.getState();
-        
         // Clear any existing slice layers from workspace
         const currentItems = workspaceStore.items;
         const sliceLayerIds = currentItems
-          .filter(item => item.type === 'sliceLayer')
-          .map(item => item.id);
-        
-        sliceLayerIds.forEach(id => workspaceStore.deleteItem(id));
-        
-        // Add all sliced layers to workspace
-        const layersToAdd = slicedLayers.map((layer, index) => ({
+          .filter((item) => item.type === 'sliceLayer')
+          .map((item) => item.id);
+        sliceLayerIds.forEach((id) => workspaceStore.deleteItem(id));
+
+        const layersToAdd = metaLayers.map((m, index) => ({
           makerJsModel: makerJsModels[index],
-          layerIndex: layer.index,
-          zCoordinate: layer.z,
-          axis,
-          layerThickness,
-          // Position in real-world coordinates
-          x: 0, // Will need to determine proper positioning
-          y: 0, // Will need to determine proper positioning
-          z: layer.z
+          layerIndex: m.layerIndex,
+          zCoordinate: m.zCoordinate,
+          axis: m.axis,
+          layerThickness: m.layerThickness,
+          plane: m.plane,
+          axisMap: m.axisMap,
+          vUpSign: m.vUpSign,
+          uvExtents: m.uvExtents,
+          x: 0,
+          y: 0,
+          z: m.zCoordinate,
         }));
-        
         workspaceStore.addMultipleSliceLayers(layersToAdd);
 
       } catch (err) {
@@ -226,20 +203,17 @@ function StlSlicerContent() {
     };
     doSlice();
     return () => { cancelled = true; };
-  }, [file, axis, layerThickness]);
+  }, [file, axis, layerThickness, slicerState]);
   
-  // Load file into slicer if file exists but model isn't loaded
+  // Parse STL if a file exists but no slicer state is present
   useEffect(() => {
-    if (!file || !slicerRef.current) return;
-    if (slicerRef.current.isModelLoaded()) return; // Already loaded
-    
+    if (!file || slicerState) return;
     const loadFile = async () => {
       try {
-        await slicerRef.current!.loadSTL(file);
-        const dims = slicerRef.current!.getDimensions();
-        if (dims) {
-          setDimensions(dims);
-        }
+        const state = await parseStl(file);
+        setSlicerState(state);
+        const dims = getSlicerDimensions(state);
+        setDimensions(dims);
         setError(null);
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : 'Failed to load STL file. Please check the file format.';
@@ -247,9 +221,8 @@ function StlSlicerContent() {
         console.error('File loading error:', err);
       }
     };
-    
     loadFile();
-  }, [file]);
+  }, [file, slicerState]);
   
   // Handle layer thickness change
   const handleLayerThicknessChange = useCallback((newThickness: number) => {
@@ -333,24 +306,33 @@ function StlSlicerContent() {
   
   // Export sliced layers as SVG files in a ZIP archive
   const handleExport = useCallback(async () => {
-    if (!slicerRef.current || !file || layers.length === 0) {
+    if (!file || layers.length === 0 || makerModels.length === 0) {
       setError('No sliced layers to export');
       return;
     }
-    
     try {
-      const svgContents = layers.map(layer => ({
-        layer,
-        svg: slicerRef.current!.generateSVG(layer),
-        makerjsSVG: slicerRef.current!.makerJSModelToSVG(slicerRef.current!.generateMakerJSModel(layer))
-      }));
-
-      await exportSvgZip(svgContents, `${file.name.replace('.stl', '')}_${axis}_${layerThickness}mm_layers.zip`);
+      const svgContents = makerModels.map((model, i) => {
+        const svg = makerjs.exporter.toSVG(model, {
+          strokeWidth: '0.1mm',
+          stroke: '#000000',
+          fill: 'none',
+        });
+        return {
+          layer: layers[i],
+          svg,
+          makerjsSVG: svg,
+        };
+      });
+      await exportSvgZip(
+        svgContents,
+        `${file.name.replace('.stl', '')}_${axis}_${layerThickness}mm_layers.zip`,
+        axis
+      );
     } catch (err) {
       setError('Failed to export layers');
       console.error(err);
     }
-  }, [file, layers]);
+  }, [file, layers, makerModels, axis, layerThickness]);
   
   // Add a new effect to ensure canvas size matches container
   useEffect(() => {
@@ -589,17 +571,7 @@ function StlSlicerContent() {
       {/* Main Content */}
       <Box style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: '1.5rem' }}>
         {/* Clear Session Button */}
-        <Group justify="flex-end" mb="md">
-          <Button
-            onClick={handleClearSession}
-            variant="filled"
-            color="red"
-            size="sm"
-            title="Clear session and remove last STL file from storage"
-          >
-            Clear Session
-          </Button>
-        </Group>
+        <ClearSessionButton onClear={handleClearSession} />
         
         {/* Error Display */}
         {error && (
@@ -611,155 +583,24 @@ function StlSlicerContent() {
         {/* 3D or 2D View based on selected mode */}
         <Box style={{ flex: 1, overflow: 'hidden' }}>
           {file && (
-            <>
-              {viewMode === '3d' ? (
-                <>
-                  <Box 
-                    style={{ 
-                      position: 'relative', 
-                      width: '100%', 
-                      height: '100%',
-                      zIndex: 10, 
-                      minHeight: '400px',
-                      pointerEvents: 'auto'
-                    }}
-                  >
-                    <StlViewer3D
-                      stlFile={file}
-                      layers={layers}
-                      axis={axis}
-                      layerThickness={layerThickness}
-                      activeLayerIndex={previewLayerIndex}
-                    />
-                    
-                    {/* Move the instructions to the top right corner */}
-                    <Box 
-                      style={{ 
-                        position: 'absolute',
-                        top: '0.5rem',
-                        right: '0.5rem',
-                        padding: '0.5rem',
-                        backgroundColor: '#e7f5ff',
-                        borderRadius: '0.375rem',
-                        fontSize: '0.875rem',
-                        boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1)',
-                        border: '1px solid #74c0fc',
-                        maxWidth: '250px',
-                        opacity: 0.85,
-                        zIndex: 20
-                      }}
-                    >
-                      <Text size="xs" fw={500}>3D Controls:</Text>
-                      <Box component="ul" style={{ listStyleType: 'disc', paddingLeft: '1rem', marginTop: '0.25rem' }}>
-                        <li>Drag to rotate</li>
-                        <li>Scroll to zoom</li>
-                        <li>Shift+drag to pan</li>
-                      </Box>
-                    </Box>
-                  </Box>
-                </>
-              ) : (
-                layers.length > 0 && (
-                  <Box style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
-                    <Group justify="space-between" align="center" mb="sm">
-                      <Text fw={500}>
-                        2D Layer Preview: {previewLayerIndex + 1} / {layers.length}
-                      </Text>
-                      <Group gap="xs">
-                        <Button
-                          onClick={() => handleZoomChange('out')}
-                          variant="outline"
-                          size="sm"
-                          title="Zoom Out"
-                        >
-                          −
-                        </Button>
-                        <Button
-                          onClick={handleZoomReset}
-                          variant="outline"
-                          size="sm"
-                          title="Reset Zoom"
-                        >
-                          Reset
-                        </Button>
-                        <Button
-                          onClick={handleFitToView}
-                          variant="outline"
-                          size="sm"
-                          title="Fit to View"
-                        >
-                          Fit
-                        </Button>
-                        <Button
-                          onClick={() => handleZoomChange('in')}
-                          variant="outline"
-                          size="sm"
-                          title="Zoom In"
-                        >
-                          +
-                        </Button>
-                        <Text size="xs" c="dimmed" ml="sm">
-                          {Math.round(zoomLevel * 100)}%
-                        </Text>
-                      </Group>
-                    </Group>
-                    <Box style={{ flex: 1, position: 'relative', overflow: 'hidden', minHeight: '400px', width: '100%', height: '100%' }}>
-                      <canvas
-                        ref={canvasRef}
-                        style={{ 
-                          width: '100%', 
-                          height: '100%', 
-                          border: '1px solid #dee2e6', 
-                          borderRadius: '0.375rem', 
-                          backgroundColor: 'white',
-                          display: 'block',
-                          position: 'absolute',
-                          top: 0,
-                          left: 0
-                        }}
-                      />
-                    </Box>
-                  </Box>
-                )
-              )}
-            </>
+            <ViewModePanel
+              file={file}
+              viewMode={viewMode}
+              layers={layers}
+              axis={axis}
+              layerThickness={layerThickness}
+              previewLayerIndex={previewLayerIndex}
+            />
           )}
         </Box>
         
         {/* Layer Navigation - Positioned below the canvas */}
         {layers.length > 0 && (
-          <Box mt="md" pt="md" style={{ borderTop: '1px solid #dee2e6' }}>
-            <Text fw={500} mb="sm">
-              Navigate Layers: {previewLayerIndex + 1} / {layers.length}
-            </Text>
-            <Group gap="md" align="center" mb="md">
-              <Button
-                onClick={() => setPreviewLayerIndex(Math.max(0, previewLayerIndex - 1))}
-                disabled={previewLayerIndex === 0}
-                variant="outline"
-                size="sm"
-              >
-                Previous
-              </Button>
-              
-              <Slider
-                min={0}
-                max={layers.length - 1}
-                value={previewLayerIndex}
-                onChange={setPreviewLayerIndex}
-                style={{ flex: 1 }}
-              />
-              
-              <Button
-                onClick={() => setPreviewLayerIndex(Math.min(layers.length - 1, previewLayerIndex + 1))}
-                disabled={previewLayerIndex === layers.length - 1}
-                variant="outline"
-                size="sm"
-              >
-                Next
-              </Button>
-            </Group>
-          </Box>
+          <LayerNavigator
+            layers={layers}
+            previewLayerIndex={previewLayerIndex}
+            onChange={setPreviewLayerIndex}
+          />
         )}
       </Box>
     </Flex>

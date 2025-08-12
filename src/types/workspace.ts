@@ -30,6 +30,11 @@ export type SliceLayerParams = {
   zCoordinate: number;        // Real-world Z coordinate of the layer
   axis: 'x' | 'y' | 'z';      // Axis along which the slice was made
   layerThickness: number;     // Thickness of each layer in mm
+  // Plane-aware 2D projection metadata (optional during migration)
+  plane?: 'XY' | 'XZ' | 'YZ';
+  axisMap?: { u: 'x' | 'y' | 'z'; v: 'x' | 'y' | 'z' };
+  vUpSign?: 1 | -1; // maker v-axis up direction (+1 usually)
+  uvExtents?: { minU: number; minV: number; maxU: number; maxV: number };
 };
 
 export type WorkspaceItem = 

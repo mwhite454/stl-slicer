@@ -27,6 +27,10 @@ export type WorkspaceActions = {
     zCoordinate: number;
     axis: 'x' | 'y' | 'z';
     layerThickness: number;
+    plane?: 'XY' | 'XZ' | 'YZ';
+    axisMap?: { u: 'x' | 'y' | 'z'; v: 'x' | 'y' | 'z' };
+    vUpSign?: 1 | -1;
+    uvExtents?: { minU: number; minV: number; maxU: number; maxV: number };
     x?: number;
     y?: number;
     z?: number;
@@ -38,6 +42,10 @@ export type WorkspaceActions = {
     zCoordinate: number;
     axis: 'x' | 'y' | 'z';
     layerThickness: number;
+    plane?: 'XY' | 'XZ' | 'YZ';
+    axisMap?: { u: 'x' | 'y' | 'z'; v: 'x' | 'y' | 'z' };
+    vUpSign?: 1 | -1;
+    uvExtents?: { minU: number; minV: number; maxU: number; maxV: number };
     x?: number;
     y?: number;
     z?: number;
@@ -163,6 +171,10 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     zCoordinate, 
     axis, 
     layerThickness,
+    plane,
+    axisMap,
+    vUpSign,
+    uvExtents,
     x = 0, 
     y = 0,
     z = zCoordinate
@@ -178,7 +190,11 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
           layerIndex,
           zCoordinate,
           axis,
-          layerThickness
+          layerThickness,
+          plane,
+          axisMap,
+          vUpSign,
+          uvExtents
         }
       };
       return { items: [...state.items, item] };
@@ -202,7 +218,11 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
             layerIndex: layerData.layerIndex,
             zCoordinate: layerData.zCoordinate,
             axis: layerData.axis,
-            layerThickness: layerData.layerThickness
+            layerThickness: layerData.layerThickness,
+            plane: layerData.plane,
+            axisMap: layerData.axisMap,
+            vUpSign: layerData.vUpSign,
+            uvExtents: layerData.uvExtents
           }
         };
         items.push(item);

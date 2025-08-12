@@ -1,0 +1,14 @@
+# MVP
+- [ ] User can upload STL, view and export slices as SVG individually
+- [ ] User can alter the height of the slices (or relevant distance moved in x, y, or z directions)
+- [ ] User can rotate the model both for viewing and for slicing
+    - [X] Users can already view the model in 3D and rotate it
+    - [ ] Users can rotate the model for slicing
+- [ ] User can select the axis to slice the model
+    - [ ] User can designate an axis as slot axis or tab axis
+- [ ] User can specify the kerf of the cut
+- [ ] User can set the color of indiviual SVG paths to allow for multiple operations of laser cutting
+- [ ] User can export the SVG paths as a zip file
+- [ ] User can export the SVG paths as a single SVG file
+- [ ] User can move and arrange SVG's generated from multiple layers in the workspace in order to create a final design
+- [ ] Developer can run functional unit tests for components and slicer utils. 

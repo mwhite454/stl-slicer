@@ -1,6 +1,6 @@
 import { saveAs } from 'file-saver';
 import JSZip from 'jszip';
-import { LayerData } from './StlSlicer';
+import type { LayerData } from '@/slicing/types';
 
 /**
  * Export a single SVG file

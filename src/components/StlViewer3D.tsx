@@ -4,7 +4,8 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
-import { Axis, LayerData } from '../utils/StlSlicer';
+import type { Axis, LayerData } from '@/slicing/types';
+import { Box, Group, Button, Alert, Paper, Text } from '@mantine/core';
 
 interface StlViewer3DProps {
   stlFile: File | null;
@@ -45,30 +46,11 @@ export default function StlViewer3D({
   
   const toggleSlicePlanes = useCallback(() => {
     setShowSlicePlanes(prev => !prev);
-    
-    if (sceneRef.current) {
-      sceneRef.current.traverse((object) => {
-        if (object.userData && object.userData.isSliceVisual) {
-          object.visible = !showSlicePlanes;
-        }
-      });
-    }
-  }, [showSlicePlanes]);
+  }, []);
   
   const toggleAllSlices = useCallback(() => {
     setShowAllSlices(prev => !prev);
-    
-    if (sceneRef.current) {
-      sceneRef.current.traverse((object) => {
-        if (object.userData && object.userData.isSliceVisual) {
-          const sliceIndex = object.userData.sliceIndex;
-          if (sliceIndex !== undefined) {
-            object.visible = showAllSlices || sliceIndex === activeLayerIndex;
-          }
-        }
-      });
-    }
-  }, [showAllSlices, activeLayerIndex]);
+  }, []);
   
   // Initialize the Three.js scene, camera, and renderer
   useEffect(() => {
@@ -469,114 +451,53 @@ export default function StlViewer3D({
   }, [renderSlicePlanes]);
   
   return (
-    <div 
+    <Box
       ref={containerRef}
-      style={{ 
-        width: '100%', 
-        height: '100%', 
-        position: 'relative',
-        touchAction: 'none' 
-      }}
+      w="100%"
+      h="100%"
+      style={{ position: 'relative', touchAction: 'none' }}
     >
-      <canvas 
-        ref={canvasRef} 
-        style={{ 
-          width: '100%', 
-          height: '100%', 
-          outline: 'none',
-          display: 'block'
-        }}
+      <canvas
+        ref={canvasRef}
+        style={{ width: '100%', height: '100%', outline: 'none', display: 'block' }}
         tabIndex={0}
       />
-      
+
       {errorMessage && (
-        <div style={{
-          position: 'absolute',
-          top: 0,
-          left: 0,
-          right: 0,
-          padding: '1rem',
-          backgroundColor: '#fecaca',
-          color: '#991b1b',
-          borderRadius: '0.375rem'
-        }}>
-          {errorMessage}
-        </div>
+        <Box style={{ position: 'absolute', top: 8, left: 8, right: 8, zIndex: 30 }}>
+          <Alert color="red" variant="light" title="Viewer error">
+            {errorMessage}
+          </Alert>
+        </Box>
       )}
-      
-      <div style={{
-        position: 'absolute',
-        bottom: '0.5rem',
-        right: '0.5rem',
-        display: 'flex',
-        gap: '0.5rem'
-      }}>
-        <button 
-          onClick={toggleGrid}
-          style={{
-            padding: '0.25rem 0.5rem',
-            backgroundColor: 'white',
-            border: '1px solid #d1d5db',
-            borderRadius: '0.375rem',
-            fontSize: '0.875rem',
-            boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)',
-            cursor: 'pointer'
-          }}
-        >
-          {showGrid ? 'Hide Grid' : 'Show Grid'}
-        </button>
-        
-        <button 
-          onClick={toggleSlicePlanes}
-          style={{
-            padding: '0.25rem 0.5rem',
-            backgroundColor: 'white',
-            border: '1px solid #d1d5db',
-            borderRadius: '0.375rem',
-            fontSize: '0.875rem',
-            boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)',
-            cursor: 'pointer'
-          }}
-        >
-          {showSlicePlanes ? 'Hide Slices' : 'Show Slices'}
-        </button>
-        
-        {layers.length > 0 && (
-          <button 
-            onClick={toggleAllSlices}
-            style={{
-              padding: '0.25rem 0.5rem',
-              backgroundColor: 'white',
-              border: '1px solid #d1d5db',
-              borderRadius: '0.375rem',
-              fontSize: '0.875rem',
-              boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)',
-              cursor: 'pointer'
-            }}
-          >
-            {showAllSlices ? 'Show Active Slice Only' : 'Show All Slices'}
-          </button>
-        )}
-      </div>
-      
-      {/* Layer information display */}
+
+      <Box style={{ position: 'absolute', bottom: 8, right: 8 }}>
+        <Group gap="xs">
+          <Button size="xs" variant="default" onClick={toggleGrid}>
+            {showGrid ? 'Hide Grid' : 'Show Grid'}
+          </Button>
+          <Button size="xs" variant="default" onClick={toggleSlicePlanes}>
+            {showSlicePlanes ? 'Hide Slices' : 'Show Slices'}
+          </Button>
+          {layers.length > 0 && (
+            <Button size="xs" variant="default" onClick={toggleAllSlices}>
+              {showAllSlices ? 'Show Active Slice Only' : 'Show All Slices'}
+            </Button>
+          )}
+        </Group>
+      </Box>
+
       {layers.length > 0 && showSlicePlanes && (
-        <div style={{
-          position: 'absolute',
-          top: '0.5rem',
-          left: '0.5rem',
-          backgroundColor: 'rgba(255, 255, 255, 0.75)',
-          padding: '0.25rem 0.5rem',
-          fontSize: '0.75rem',
-          borderRadius: '0.25rem',
-          boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)',
-          zIndex: 20
-        }}>
-          Layer: {activeLayerIndex + 1}/{layers.length} 
-          {layers[activeLayerIndex] && ` — Height: ${layers[activeLayerIndex].z.toFixed(2)}mm`}
-        </div>
+        <Box style={{ position: 'absolute', top: 8, left: 8, zIndex: 20 }}>
+          <Paper shadow="xs" radius="sm" withBorder style={{ backgroundColor: 'rgba(255, 255, 255, 0.75)', padding: '4px 8px' }}>
+            <Text size="xs">
+              Layer: {activeLayerIndex + 1}/{layers.length}
+              {layers[activeLayerIndex] && ` — Height: ${layers[activeLayerIndex].z.toFixed(2)}mm`}
+            </Text>
+          </Paper>
+        </Box>
       )}
-    </div>
+    </Box>
   );
 }
 

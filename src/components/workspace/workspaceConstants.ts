@@ -1,5 +1,5 @@
 export const MIN_ZOOM = 0.25;
-export const MAX_ZOOM = 4;
+export const MAX_ZOOM = 8;
 export const WHEEL_ZOOM_SENSITIVITY = 0.0015; // base multiplier for wheel zoom
 export const FIT_MARGIN_MM = 2; // extra margin when fitting content to bounds (in mm)
 export const GRID_LINE_STROKE = { color: '#e0e0e0', width: 0.2 } as const;
