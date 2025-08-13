@@ -231,12 +231,10 @@ export function WorkspaceStage({ visibleItemIds }: { visibleItemIds?: string[] }
         // Imperatively update transform for smoothness
         const g = contentGroupRef.current;
         if (g) {
-          const cx = bounds.width / 2;
-          const cy = bounds.height / 2;
-          // Flip around center first, then apply pan and zoom for intuitive controls
+          // Match render transform: centered viewBox, Y-up flip, then pan (unscaled), then zoom
           g.setAttribute(
             'transform',
-            `translate(${cx} ${cy}) scale(1 -1) translate(${-cx} ${-cy}) translate(${pending.x} ${pending.y}) scale(${viewport.zoom})`
+            `scale(1 -1) translate(${pending.x} ${pending.y}) scale(${viewport.zoom})`
           );
         }
       });
@@ -546,7 +544,7 @@ export function WorkspaceStage({ visibleItemIds }: { visibleItemIds?: string[] }
             {/* Pan/Zoom group in mm, Y-up with origin flip around center */}
             <g
               ref={contentGroupRef}
-              transform={`translate(${bounds.width / 2} ${bounds.height / 2}) scale(1 -1) translate(${-bounds.width / 2} ${-bounds.height / 2}) translate(${viewport.pan.x} ${viewport.pan.y}) scale(${viewport.zoom})`}
+              transform={`scale(1 -1) translate(${viewport.pan.x} ${viewport.pan.y}) scale(${viewport.zoom})`}
             >
               {/* Meta models (e.g., grid) rendered behind content */}
             {items

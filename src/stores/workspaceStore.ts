@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import makerjs from 'makerjs';
 import { nanoid } from 'nanoid';
 import type {
   WorkspaceState,
@@ -206,15 +207,32 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     axisMap,
     vUpSign,
     uvExtents,
-    x = 0, 
-    y = 0,
+    x, 
+    y,
     z = zCoordinate
   }) =>
     set((state) => {
+      // Determine extents and center position if not provided
+      let w = 0;
+      let h = 0;
+      if (uvExtents) {
+        w = Math.max(0, uvExtents.maxU - uvExtents.minU);
+        h = Math.max(0, uvExtents.maxV - uvExtents.minV);
+      } else {
+        const ext = makerjs.measure.modelExtents(makerJsModel as any);
+        if (ext) {
+          w = Math.max(0, ext.high[0] - ext.low[0]);
+          h = Math.max(0, ext.high[1] - ext.low[1]);
+        }
+      }
+      const cx = Math.max(0, (state.bounds.width - w) / 2);
+      const cy = Math.max(0, (state.bounds.height - h) / 2);
+      const px = x ?? cx;
+      const py = y ?? cy;
       const item: WorkspaceItem = {
         id: nanoid(),
         type: 'sliceLayer',
-        position: { x, y, z },
+        position: { x: px, y: py, z },
         zIndex: state.items.length,
         operationId: null,
         layer: {
@@ -236,12 +254,29 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     set((state) => {
       const items: WorkspaceItem[] = [...state.items];
       layers.forEach((layerData, index) => {
+        // Compute extents for centering if no x/y provided
+        let w = 0;
+        let h = 0;
+        if (layerData.uvExtents) {
+          w = Math.max(0, layerData.uvExtents.maxU - layerData.uvExtents.minU);
+          h = Math.max(0, layerData.uvExtents.maxV - layerData.uvExtents.minV);
+        } else {
+          const ext = makerjs.measure.modelExtents(layerData.makerJsModel as any);
+          if (ext) {
+            w = Math.max(0, ext.high[0] - ext.low[0]);
+            h = Math.max(0, ext.high[1] - ext.low[1]);
+          }
+        }
+        const cx = Math.max(0, (state.bounds.width - w) / 2);
+        const cy = Math.max(0, (state.bounds.height - h) / 2);
+        const px = layerData.x ?? cx;
+        const py = layerData.y ?? cy;
         const item: WorkspaceItem = {
           id: nanoid(),
           type: 'sliceLayer',
           position: { 
-            x: layerData.x || 0, 
-            y: layerData.y || 0, 
+            x: px, 
+            y: py, 
             z: layerData.z || layerData.zCoordinate 
           },
           zIndex: items.length + index,

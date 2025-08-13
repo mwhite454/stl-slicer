@@ -23,7 +23,7 @@ export const WorkspaceSvg = forwardRef<SVGSVGElement, WorkspaceSvgProps>(
       ref={ref}
       width="100%"
       height="100%"
-      viewBox={`0 0 ${bounds.width} ${bounds.height}`}
+      viewBox={`${-bounds.width / 2} ${-bounds.height / 2} ${bounds.width} ${bounds.height}`}
       style={{
         background: '#fff',
         border: '1px solid #e5e5e5',
