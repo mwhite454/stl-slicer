@@ -127,7 +127,8 @@ export function applyMarginToBounds(bounds: BoundingBox, margin: number): Boundi
   };
 }
 
-export function calculateBoundsFromPaths(paths: Array<Array<THREE.Vector2>>): BoundingBox {
+type Vec2 = { x: number; y: number };
+export function calculateBoundsFromPaths(paths: Array<Array<Vec2>>): BoundingBox {
   let bounds = initializeBounds();
   for (let i = 0; i < paths.length; i += 1) {
     const path = paths[i];
@@ -165,7 +166,16 @@ export function calculateCenterPan(bounds: BoundingBox, containerWidth: number, 
 /**
  * Calculates rendering properties for a rectangle workspace item
  */
-export function calculateRectangleRenderProps(item: Extract<WorkspaceItem, { type: 'rectangle' }>, activeId: string | null, dragPosMm: { x: number; y: number } | null, selectionOverlayOffsetPx: number, getMmPerPx: () => { x: number; y: number }, rectPathData: (width: number, height: number) => string, transformForMakerPath: (x: number, y: number, height: number) => string) {
+export function calculateRectangleRenderProps(
+  item: Extract<WorkspaceItem, { type: 'rectangle' }>,
+  activeId: string | null,
+  dragPosMm: { x: number; y: number } | null,
+  selectionOverlayOffsetPx: number,
+  getMmPerPx: () => { x: number; y: number },
+  rectPathData: (width: number, height: number) => string,
+  transformForMakerPath: (x: number, y: number, height: number) => string,
+  bounds: { width: number; height: number }
+) {
   const d = rectPathData(item.rect.width, item.rect.height);
   const posX = activeId === item.id && dragPosMm ? dragPosMm.x : item.position.x;
   const posY = activeId === item.id && dragPosMm ? dragPosMm.y : item.position.y;
@@ -174,15 +184,21 @@ export function calculateRectangleRenderProps(item: Extract<WorkspaceItem, { typ
   const mmpp = getMmPerPx();
   const ox = selectionOverlayOffsetPx * mmpp.x;
   const oy = selectionOverlayOffsetPx * mmpp.y;
-  const selX = posX - ox;
-  const selY = posY - oy;
   const selW = item.rect.width + ox * 2;
   const selH = item.rect.height + oy * 2;
+  // Convert to centered Y-up space: x' = x - cx; y' (bottom-left) = (H - (y + h)) - cy
+  const cx = bounds.width / 2;
+  const cy = bounds.height / 2;
+  const xLeftCenter = (posX - ox) - cx;
+  const yBottomCenter = (bounds.height - (posY + item.rect.height) - oy) - cy;
+  const selX = xLeftCenter;
+  const selY = yBottomCenter;
   
   const draggablePathProps = {
     id: item.id,
     d,
-    transform: transformForMakerPath(posX, posY, item.rect.height * -1),
+    // Place bottom-left at centered Y-up position
+    transform: transformForMakerPath(xLeftCenter + ox, yBottomCenter + oy, item.rect.height),
     selected: false, // This will be set by the caller
     setPathRef: undefined as any, // This will be set by the caller
     onClick: () => {} // This will be set by the caller
@@ -206,7 +222,15 @@ export function calculateRectangleRenderProps(item: Extract<WorkspaceItem, { typ
 /**
  * Calculates rendering properties for a slice layer workspace item
  */
-export function calculateSliceLayerRenderProps(item: Extract<WorkspaceItem, { type: 'sliceLayer' }>, activeId: string | null, dragPosMm: { x: number; y: number } | null, selectionOverlayOffsetPx: number, getMmPerPx: () => { x: number; y: number }, transformForMakerPath: (x: number, y: number, height: number) => string) {
+export function calculateSliceLayerRenderProps(
+  item: Extract<WorkspaceItem, { type: 'sliceLayer' }>,
+  activeId: string | null,
+  dragPosMm: { x: number; y: number } | null,
+  selectionOverlayOffsetPx: number,
+  getMmPerPx: () => { x: number; y: number },
+  transformForMakerPath: (x: number, y: number, height: number) => string,
+  bounds: { width: number; height: number }
+) {
   const posX = activeId === item.id && dragPosMm ? dragPosMm.x : item.position.x;
   const posY = activeId === item.id && dragPosMm ? dragPosMm.y : item.position.y;
   
@@ -235,13 +259,18 @@ export function calculateSliceLayerRenderProps(item: Extract<WorkspaceItem, { ty
   // The transformForMakerPath adds height, but with origin [-minU, -maxV],
   // the visual geometry ends up at approximately posY - height
   // So we need to position the selection overlay there too
-  const selX = posX - ox;
-  const selY = posY - height - oy;  // Match where geometry visually appears
   const selW = width + ox * 2;
   const selH = height + oy * 2;
+  const cx = bounds.width / 2;
+  const cy = bounds.height / 2;
+  const xLeftCenter = (posX - ox) - cx;
+  const yBottomCenter = (bounds.height - (posY + height) - oy) - cy;
+  const selX = xLeftCenter;
+  const selY = yBottomCenter;
   
   // Use the same transform that works for rectangles
-  const transformStr = transformForMakerPath(posX, posY, height);
+  // Place bottom-left at centered Y-up position
+  const transformStr = transformForMakerPath(xLeftCenter + ox, yBottomCenter + oy, height);
   
   const draggablePathProps = {
     id: item.id,

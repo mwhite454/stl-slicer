@@ -3,27 +3,34 @@
 import React, { useMemo, useRef, useState, useEffect } from 'react';
 import { Box, Collapse, Button } from '@mantine/core';
 import { useElementSize } from '@mantine/hooks';
-import { useWorkspaceStore } from '@/stores/workspaceStore';
+import {
+  useWorkspaceStore,
+} from '@/stores/workspaceStore';
 import { rectPathData } from '@/lib/maker/generateSvgPath';
 import { transformForMakerPath } from '@/lib/coords';
 import makerjs from 'makerjs';
+import type { MakerJSModel } from '@/lib/coords';
 import { DndContext, DragEndEvent, DragMoveEvent, DragStartEvent, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { WorkspaceSvg } from '@/components/workspace/WorkspaceSvg';
 import { DraggablePath } from './DraggablePath';
 import { SelectionWrapper } from './SelectionWrapper';
-import { WorkspaceBorder } from './Grid/WorkspaceBorder';
+// Border is now rendered from Maker.js meta model
 import { WorkspacePerfHud } from './WorkspacePerfHud';
-import { WorkspaceGrid } from './Grid/WorkspaceGrid';
+// import WorkspaceGrid from './Grid/WorkspaceGrid'; // replaced by maker.js meta grid
+import { generateMakerGridModel } from '@/lib/maker/generateGridModel';
+import { generateMakerWorkspaceModel } from '@/lib/maker/generateWorkspaceModel';
 import { DebugMarker } from './Debug/DebugMarker';
-import { MAX_ZOOM, MIN_ZOOM, WHEEL_ZOOM_SENSITIVITY, MIN_POSITION_MM, DIRECTION_KEY_MAP, NUDGE_MIN_MM, FIT_MARGIN_MM , MIN_SPEED_MULT } from './workspaceConstants';
+import { MAX_ZOOM, MIN_ZOOM, WHEEL_ZOOM_SENSITIVITY, MIN_POSITION_MM, DIRECTION_KEY_MAP, NUDGE_MIN_MM, FIT_MARGIN_MM , MIN_SPEED_MULT, BORDER_STROKE } from './workspaceConstants';
 import { calculateRectangleBounds, calculateSliceLayerBounds, updateBounds, initializeBounds, applyMarginToBounds, calculateFitZoom, calculateCenterPan, calculateRectangleRenderProps, calculateSliceLayerRenderProps } from './workspaceDataHelpers';
 
 type DragOrigin = { id: string; x0: number; y0: number } | null;
 
 export function WorkspaceStage({ visibleItemIds }: { visibleItemIds?: string[] }) {
-  const bounds = useWorkspaceStore((s) => s.bounds);
   const grid = useWorkspaceStore((s) => s.grid);
+  const bounds = useWorkspaceStore((s) => s.bounds);
   const viewport = useWorkspaceStore((s) => s.viewport);
+  const upsertMetaGrid = useWorkspaceStore((s) => s.upsertMetaGrid);
+  const upsertMetaWorkspace = useWorkspaceStore((s) => s.upsertMetaWorkspace);
   const items = useWorkspaceStore((s) => s.items);
   const selectedIds = useWorkspaceStore((s) => s.selection.selectedIds);
   const selectOnly = useWorkspaceStore((s) => s.selectOnly);
@@ -68,6 +75,41 @@ export function WorkspaceStage({ visibleItemIds }: { visibleItemIds?: string[] }
     if (el) pathRefs.current.set(id, el);
     else pathRefs.current.delete(id);
   };
+
+  // Map screen-space delta (px) to content mm using inverse CTM of content group
+  const deltaPxToMm = (dxPx: number, dyPx: number) => {
+    const g = contentGroupRef.current;
+    const m = g?.getScreenCTM();
+    if (!m) {
+      const s = getMmPerPx();
+      return { x: dxPx * s.x, y: dyPx * s.y };
+    }
+    const det = m.a * m.d - m.b * m.c;
+    if (!det) {
+      const s = getMmPerPx();
+      return { x: dxPx * s.x, y: dyPx * s.y };
+    }
+    // Inverse of 2x2 [a c; b d] applied to vector
+    const ia = m.d / det;
+    const ib = -m.b / det;
+    const ic = -m.c / det;
+    const id = m.a / det;
+    return { x: ia * dxPx + ic * dyPx, y: ib * dxPx + id * dyPx };
+  };
+
+  // Generate maker.js grid and workspace meta models whenever bounds or grid change
+  // TODO(workspace-chrome): If/when adding rulers/background/safe-margins, extend the
+  // workspace model here (generateMakerWorkspaceModel) with feature flags/settings from store UI.
+  useEffect(() => {
+    if (!grid.show) {
+      // Keep simple for now: do not remove; could call removeMetaByType('grid')
+      return;
+    }
+    const gridModel = generateMakerGridModel(bounds.width, bounds.height, grid.size);
+    upsertMetaGrid(gridModel as unknown as MakerJSModel);
+    const workspaceModel = generateMakerWorkspaceModel(bounds.width, bounds.height);
+    upsertMetaWorkspace(workspaceModel as unknown as MakerJSModel);
+  }, [bounds.width, bounds.height, grid.size, grid.show, upsertMetaGrid, upsertMetaWorkspace]);
 
   // Debug toggles removed after finalizing plane-aware transform/origin pairing
 
@@ -173,9 +215,10 @@ export function WorkspaceStage({ visibleItemIds }: { visibleItemIds?: string[] }
     const dxPx = e.clientX - last.x;
     const dyPx = e.clientY - last.y;
     panPointerRef.current = { x: e.clientX, y: e.clientY };
-    const mmpp = getMmPerPx();
-    const dxMm = dxPx * mmpp.x * Math.max(MIN_SPEED_MULT, panSpeedMultiplier);
-    const dyMm = dyPx * mmpp.y * Math.max(MIN_SPEED_MULT, panSpeedMultiplier);
+    const v = deltaPxToMm(dxPx, dyPx);
+    const speed = Math.max(MIN_SPEED_MULT, panSpeedMultiplier);
+    const dxMm = v.x * speed;
+    const dyMm = v.y * speed;
     panDeltaRef.current = { x: panDeltaRef.current.x + dxMm, y: panDeltaRef.current.y + dyMm };
     const start = panStartRef.current ?? { x: 0, y: 0 };
     const next = { x: start.x + panDeltaRef.current.x, y: start.y + panDeltaRef.current.y };
@@ -188,7 +231,13 @@ export function WorkspaceStage({ visibleItemIds }: { visibleItemIds?: string[] }
         // Imperatively update transform for smoothness
         const g = contentGroupRef.current;
         if (g) {
-          g.setAttribute('transform', `translate(${pending.x} ${pending.y}) scale(${viewport.zoom})`);
+          const cx = bounds.width / 2;
+          const cy = bounds.height / 2;
+          // Flip around center first, then apply pan and zoom for intuitive controls
+          g.setAttribute(
+            'transform',
+            `translate(${cx} ${cy}) scale(1 -1) translate(${-cx} ${-cy}) translate(${pending.x} ${pending.y}) scale(${viewport.zoom})`
+          );
         }
       });
     }
@@ -224,7 +273,8 @@ export function WorkspaceStage({ visibleItemIds }: { visibleItemIds?: string[] }
     const m = g.getScreenCTM();
     if (!m) return { x: 0, y: 0 };
     // a and d represent scaleX and scaleY
-    return { x: 1 / m.a, y: 1 / m.d };
+    // Use absolute to avoid sign inversion when stage is flipped in Y
+    return { x: 1 / Math.abs(m.a), y: 1 / Math.abs(m.d) };
   };
 
   // Grid moved to dedicated component
@@ -247,9 +297,9 @@ export function WorkspaceStage({ visibleItemIds }: { visibleItemIds?: string[] }
     if (!item) return;
     const dxPx = e.delta.x;
     const dyPx = e.delta.y;
-    const mmpp = getMmPerPx();
-    const dxMm = dxPx * mmpp.x;
-    const dyMm = dyPx * mmpp.y;
+    const v = deltaPxToMm(dxPx, dyPx); // v is in centered Y-up local mm
+    const dxMm = v.x;
+    const dyMm = -v.y; // positions are stored in top-left Y-down; invert Y
     let nx = x0 + dxMm;
     let ny = y0 + dyMm;
     // Clamp within bounds (ensuring item stays fully inside)
@@ -292,6 +342,9 @@ export function WorkspaceStage({ visibleItemIds }: { visibleItemIds?: string[] }
         if (!pending || !activeId) return;
         const el = pathRefs.current.get(activeId);
         if (el) {
+          // Map from stored top-left Y-down to centered Y-up for transform
+          const cx = bounds.width / 2;
+          const cy = bounds.height / 2;
           if (item.type === 'sliceLayer') {
             const extRaw = makerjs.measure.modelExtents(item.layer.makerJsModel);
             const planeAware = Boolean(item.layer.plane);
@@ -299,11 +352,15 @@ export function WorkspaceStage({ visibleItemIds }: { visibleItemIds?: string[] }
             const minV = extRaw ? (metaExt?.minV ?? extRaw.low[1]) : 0;
             const maxV = extRaw ? (metaExt?.maxV ?? extRaw.high[1]) : 0;
             const ih = Math.max(0, maxV - minV);
-            const t = transformForMakerPath(pending.x, pending.y, ih);
+            const xLeftCenter = pending.x - cx;
+            const yBottomCenter = (bounds.height - (pending.y + ih)) - cy;
+            const t = transformForMakerPath(xLeftCenter, yBottomCenter, ih);
             el.setAttribute('transform', t);
           } else {
             const ih = item.rect.height;
-            el.setAttribute('transform', transformForMakerPath(pending.x, pending.y, ih));
+            const xLeftCenter = pending.x - cx;
+            const yBottomCenter = (bounds.height - (pending.y + ih)) - cy;
+            el.setAttribute('transform', transformForMakerPath(xLeftCenter, yBottomCenter, ih));
           }
         }
       });
@@ -486,13 +543,102 @@ export function WorkspaceStage({ visibleItemIds }: { visibleItemIds?: string[] }
             onClick={handleDebugClick}
           >
             
-            {/* Pan/Zoom group in mm */}
-            <g ref={contentGroupRef} transform={`translate(${viewport.pan.x} ${viewport.pan.y}) scale(${viewport.zoom})`}>
-              {/* Grid */}
-              <WorkspaceGrid bounds={bounds} grid={grid} />
+            {/* Pan/Zoom group in mm, Y-up with origin flip around center */}
+            <g
+              ref={contentGroupRef}
+              transform={`translate(${bounds.width / 2} ${bounds.height / 2}) scale(1 -1) translate(${-bounds.width / 2} ${-bounds.height / 2}) translate(${viewport.pan.x} ${viewport.pan.y}) scale(${viewport.zoom})`}
+            >
+              {/* Meta models (e.g., grid) rendered behind content */}
+            {items
+              .filter((it) => it.type === 'metaModel' && (it.metaType === 'grid' || it.metaType === 'workspace'))
+              .map((meta) => {
+                if (meta.type !== 'metaModel') return null;
+                const model = meta.makerJsModel as unknown as makerjs.IModel;
+                if (meta.metaType === 'grid') {
+                  const gridPathAny = makerjs.exporter.toSVGPathData(model as any, { origin: [0, 0] } as any);
+                  const gridPath = typeof gridPathAny === 'string' ? gridPathAny : Object.values(gridPathAny ?? {}).join(' ');
+                  const axesModel = (model.models && (model.models as any).axes) as makerjs.IModel | undefined;
+                  let xAxisPath = '';
+                  let yAxisPath = '';
+                  if (axesModel && axesModel.paths) {
+                    const axisX = (axesModel.paths as any)['axis-x'];
+                    const axisY = (axesModel.paths as any)['axis-y'];
+                    if (axisX) {
+                      const mX: makerjs.IModel = { paths: { 'axis-x': axisX } } as any;
+                      const xAny = makerjs.exporter.toSVGPathData(mX as any, { origin: [0, 0] } as any);
+                      xAxisPath = typeof xAny === 'string' ? xAny : Object.values(xAny ?? {}).join(' ');
+                    }
+                    if (axisY) {
+                      const mY: makerjs.IModel = { paths: { 'axis-y': axisY } } as any;
+                      const yAny = makerjs.exporter.toSVGPathData(mY as any, { origin: [0, 0] } as any);
+                      yAxisPath = typeof yAny === 'string' ? yAny : Object.values(yAny ?? {}).join(' ');
+                    }
+                  }
+                  return (
+                    <g key={meta.id} aria-roledescription="meta-grid">
+                      {gridPath && (
+                        <g shapeRendering="crispEdges">
+                          <path
+                            d={gridPath}
+                            fill="none"
+                            stroke="#e9ecef"
+                            strokeWidth={0.5}
+                            strokeLinecap="square"
+                          />
+                        </g>
+                      )}
+                      {xAxisPath && (
+                        <path
+                          d={xAxisPath}
+                          fill="none"
+                          stroke="#fa5252" /* red for X axis */
+                          strokeWidth={0.8}
+                          strokeLinecap="square"
+                          vectorEffect="non-scaling-stroke"
+                        />
+                      )}
+                      {yAxisPath && (
+                        <path
+                          d={yAxisPath}
+                          fill="none"
+                          stroke="#2f9e44" /* green for Y axis */
+                          strokeWidth={0.8}
+                          strokeLinecap="square"
+                          vectorEffect="non-scaling-stroke"
+                        />
+                      )}
+                    </g>
+                  );
+                }
+                if (meta.metaType === 'workspace') {
+                  // TODO(workspace-chrome): Render additional workspace chrome here:
+                  // - background fill panel
+                  // - rulers (tick marks + labels)
+                  // - origin marker at (0,0)
+                  // - printable/safe-area overlays
+                  const borderModel = (model.models && (model.models as any).border) as makerjs.IModel | undefined;
+                  if (!borderModel) return null;
+                  const bAny = makerjs.exporter.toSVGPathData(borderModel as any, { origin: [0, 0] } as any);
+                  const borderPath = typeof bAny === 'string' ? bAny : Object.values(bAny ?? {}).join(' ');
+                  return (
+                    <g key={meta.id} aria-roledescription="meta-workspace">
+                      {borderPath && (
+                        <path
+                          d={borderPath}
+                          fill="none"
+                          stroke={BORDER_STROKE.color}
+                          strokeWidth={BORDER_STROKE.width}
+                          vectorEffect="non-scaling-stroke"
+                          strokeLinecap="square"
+                        />
+                      )}
+                    </g>
+                  );
+                }
+                return null;
+              })}
 
-              {/* Workspace border in content space */}
-              <WorkspaceBorder width={bounds.width} height={bounds.height} />
+              {/* Border now rendered from meta model above */}
 
               {/* Items */}
               {renderItems.map((renderItem) => {
@@ -505,7 +651,8 @@ export function WorkspaceStage({ visibleItemIds }: { visibleItemIds?: string[] }
                     selectionOverlayOffsetPx,
                     getMmPerPx,
                     rectPathData,
-                    transformForMakerPath
+                    transformForMakerPath,
+                    bounds
                   );
                   
                   return (
@@ -528,7 +675,8 @@ export function WorkspaceStage({ visibleItemIds }: { visibleItemIds?: string[] }
                     dragPosMm,
                     selectionOverlayOffsetPx,
                     getMmPerPx,
-                    transformForMakerPath
+                    transformForMakerPath,
+                    bounds
                   );
                   
                   if (!renderProps) return null;
@@ -598,18 +746,9 @@ export function WorkspaceStage({ visibleItemIds }: { visibleItemIds?: string[] }
             ))}
           </Box>
         )}
-        
-        {/* Performance HUD toggle */}
-        <Box style={{ position: 'absolute', top: 8, right: 8, zIndex: 1001 }}>
-          <Button
-            onClick={() => setUi({ showPerfHud: !showPerfHud })}
-            size="xs"
-            variant="outline"
-          >
-            {showPerfHud ? 'Hide' : 'Show'} Performance
-          </Button>
+        {/* Close workspace area container */}
         </Box>
-      </Box>
+
       
       {/* Performance HUD accordion - positioned beneath workspace */}
       <Collapse in={showPerfHud}>

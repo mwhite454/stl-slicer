@@ -57,8 +57,18 @@ export type WorkspaceItem =
       // Optional laser operation assignment for laser workflow coloring
       operationId?: string | null;
       layer: SliceLayerParams;
+    }
+  | {
+      id: string;
+      type: 'metaModel';
+      // Rendered in centered Y-up space; position is ignored for now (reserved for future offset)
+      position: { x: number; y: number; z?: number };
+      zIndex: number;
+      locked?: boolean;
+      operationId?: string | null; // should be 'meta'
+      metaType: 'grid' | 'workspace';
+      makerJsModel: MakerJSModel;
     };
-
 
 
 

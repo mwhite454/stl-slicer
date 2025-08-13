@@ -73,6 +73,11 @@ export type WorkspaceActions = {
   addOperation: (op: Omit<LaserOperation, 'id' | 'isMeta'> & { id?: string; isMeta?: boolean }) => void;
   updateOperation: (id: string, updates: Partial<Omit<LaserOperation, 'id' | 'isMeta'>>) => void;
   removeOperation: (id: string) => void; // cannot remove meta
+  
+  // meta models
+  upsertMetaGrid: (model: MakerJSModel) => void;
+  upsertMetaWorkspace: (model: MakerJSModel) => void;
+  removeMetaByType: (metaType: 'grid' | 'workspace') => void;
 };
 
 export type WorkspaceStore = WorkspaceState & WorkspaceActions;
@@ -94,6 +99,10 @@ const DEFAULT_UI: UiSettings = {
   showPerfHud: false,
   fitToBoundsRequestId: 0,
 };
+
+// TODO(workspace-chrome): Consider adding UI settings to toggle/show workspace chrome features
+// such as rulers, background fill, origin marker visibility, and printable/safe-area overlays.
+// These flags can be read in WorkspaceStage to parameterize generateMakerWorkspaceModel.
 
 // Seed an initial Mantine-like operation palette
 const DEFAULT_OPERATIONS: LaserOperation[] = [
@@ -291,4 +300,54 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
       const items = state.items.map((it) => (it.operationId === op.id || it.operationId === op.key ? { ...it, operationId: null } : it));
       return { operations: remaining, items };
     }),
+
+  // Meta models
+  upsertMetaGrid: (model) =>
+    set((state) => {
+      const metaId = 'meta-grid';
+      const existingIdx = state.items.findIndex((it) => it.type === 'metaModel' && it.metaType === 'grid');
+      const opMeta = state.operations.find((o) => o.key === 'meta' || o.id === 'op-meta');
+      const metaItem = {
+        id: metaId,
+        type: 'metaModel' as const,
+        position: { x: 0, y: 0, z: 0 },
+        zIndex: -1000, // force behind others
+        locked: true,
+        operationId: opMeta ? (opMeta.id ?? opMeta.key) : null,
+        metaType: 'grid' as const,
+        makerJsModel: model,
+      };
+      if (existingIdx >= 0) {
+        const items = [...state.items];
+        items[existingIdx] = { ...metaItem };
+        return { items };
+      }
+      return { items: [metaItem, ...state.items] };
+    }),
+  // TODO(workspace-chrome): Parameterize the workspace meta model generation with UI settings
+  // (e.g., enable rulers, margins), and re-upsert here when those settings change.
+  upsertMetaWorkspace: (model) =>
+    set((state) => {
+      const metaId = 'meta-workspace';
+      const existingIdx = state.items.findIndex((it) => it.type === 'metaModel' && it.metaType === 'workspace');
+      const opMeta = state.operations.find((o) => o.key === 'meta' || o.id === 'op-meta');
+      const metaItem = {
+        id: metaId,
+        type: 'metaModel' as const,
+        position: { x: 0, y: 0, z: 0 },
+        zIndex: -2000,
+        locked: true,
+        operationId: opMeta ? (opMeta.id ?? opMeta.key) : null,
+        metaType: 'workspace' as const,
+        makerJsModel: model,
+      };
+      if (existingIdx >= 0) {
+        const items = [...state.items];
+        items[existingIdx] = { ...metaItem };
+        return { items };
+      }
+      return { items: [metaItem, ...state.items] };
+    }),
+  removeMetaByType: (metaType) =>
+    set((state) => ({ items: state.items.filter((it) => !(it.type === 'metaModel' && it.metaType === metaType)) })),
 }));
