@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useMemo, useRef, useState, useEffect } from 'react';
-import { Box } from '@mantine/core';
+import { Box, Collapse, Button } from '@mantine/core';
 import { useElementSize } from '@mantine/hooks';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { rectPathData } from '@/lib/maker/generateSvgPath';
@@ -11,9 +11,11 @@ import { DndContext, DragEndEvent, DragMoveEvent, DragStartEvent, PointerSensor,
 import { WorkspaceSvg } from '@/components/workspace/WorkspaceSvg';
 import { DraggablePath } from './DraggablePath';
 import { SelectionWrapper } from './SelectionWrapper';
-import { WorkspaceBorder } from './WorkspaceBorder';
+import { WorkspaceBorder } from './Grid/WorkspaceBorder';
 import { WorkspacePerfHud } from './WorkspacePerfHud';
-import { MAX_ZOOM, MIN_ZOOM, WHEEL_ZOOM_SENSITIVITY, GRID_LINE_STROKE, MIN_POSITION_MM, DIRECTION_KEY_MAP, NUDGE_MIN_MM, FIT_MARGIN_MM, BORDER_STROKE, MIN_SPEED_MULT } from './workspaceConstants';
+import { WorkspaceGrid } from './Grid/WorkspaceGrid';
+import { DebugMarker } from './Debug/DebugMarker';
+import { MAX_ZOOM, MIN_ZOOM, WHEEL_ZOOM_SENSITIVITY, MIN_POSITION_MM, DIRECTION_KEY_MAP, NUDGE_MIN_MM, FIT_MARGIN_MM , MIN_SPEED_MULT } from './workspaceConstants';
 import { calculateRectangleBounds, calculateSliceLayerBounds, updateBounds, initializeBounds, applyMarginToBounds, calculateFitZoom, calculateCenterPan, calculateRectangleRenderProps, calculateSliceLayerRenderProps } from './workspaceDataHelpers';
 
 type DragOrigin = { id: string; x0: number; y0: number } | null;
@@ -33,6 +35,7 @@ export function WorkspaceStage({ visibleItemIds }: { visibleItemIds?: string[] }
   const panSpeedMultiplier = useWorkspaceStore((s) => s.ui.panSpeedMultiplier);
   const zoomSpeedMultiplier = useWorkspaceStore((s) => s.ui.zoomSpeedMultiplier);
   const showPerfHud = useWorkspaceStore((s) => s.ui.showPerfHud);
+  const setUi = useWorkspaceStore((s) => s.setUi);
   const fitToBoundsRequestId = useWorkspaceStore((s) => s.ui.fitToBoundsRequestId);
   const nudgeDistanceMm = useWorkspaceStore((s) => s.ui.nudgeDistanceMm);
 
@@ -79,6 +82,15 @@ export function WorkspaceStage({ visibleItemIds }: { visibleItemIds?: string[] }
     } catch (_e) {
       return null;
     }
+  }, [selectedIds, items]);
+
+  // Selected sliceLayer item for Perf HUD card
+  const selectedSliceLayer = useMemo(() => {
+    const id = selectedIds[0];
+    if (!id) return null;
+    const it = items.find((x) => x.id === id);
+    if (!it || it.type !== 'sliceLayer') return null;
+    return it;
   }, [selectedIds, items]);
 
   // Removed metrics debug effect after alignment finalized
@@ -215,39 +227,7 @@ export function WorkspaceStage({ visibleItemIds }: { visibleItemIds?: string[] }
     return { x: 1 / m.a, y: 1 / m.d };
   };
 
-  const gridLines = useMemo(() => {
-    if (!grid.show || grid.size <= 0) return null;
-    const lines: React.ReactElement[] = [];
-    // vertical lines
-    for (let x = 0; x <= bounds.width; x += grid.size) {
-      lines.push(
-        <line
-          key={`v-${x}`}
-          x1={x}
-          y1={0}
-          x2={x}
-          y2={bounds.height}
-          stroke={GRID_LINE_STROKE.color}
-          strokeWidth={GRID_LINE_STROKE.width}
-        />
-      );
-    }
-    // horizontal lines
-    for (let y = 0; y <= bounds.height; y += grid.size) {
-      lines.push(
-        <line
-          key={`h-${y}`}
-          x1={0}
-          y1={y}
-          x2={bounds.width}
-          y2={y}
-          stroke={GRID_LINE_STROKE.color}
-          strokeWidth={GRID_LINE_STROKE.width}
-        />
-      );
-    }
-    return lines;
-  }, [grid.show, grid.size, bounds.width, bounds.height]);
+  // Grid moved to dedicated component
 
   // DnD handlers
   const onDragStart = (e: DragStartEvent) => {
@@ -482,180 +462,180 @@ export function WorkspaceStage({ visibleItemIds }: { visibleItemIds?: string[] }
 
   return (
     <Box
-      style={{ width: '100%', height: '100%', outline: 'none', position: 'relative' }}
+      style={{ 
+        display: 'flex', 
+        flexDirection: 'column', 
+        height: '100%', 
+        outline: 'none' 
+      }}
       tabIndex={0}
       onKeyDown={handleKeyDown}
     >
-      <DndContext sensors={sensors} onDragStart={onDragStart} onDragMove={onDragMove} onDragEnd={onDragEnd}>
-        <WorkspaceSvg
-          ref={svgRef as any}
-          bounds={bounds}
-          isPanning={isPanning}
-          onClearSelection={() => selectOnly(null)}
-          // onWheel removed - handled by non-passive listener in useEffect
-          onPointerDown={onPointerDown}
-          onPointerMove={onPointerMove}
-          onPointerUp={onPointerUp}
-          onClick={handleDebugClick}
-        >
-          
-          {/* Pan/Zoom group in mm */}
-          <g ref={contentGroupRef} transform={`translate(${viewport.pan.x} ${viewport.pan.y}) scale(${viewport.zoom})`}>
-            {/* Grid */}
-            {gridLines}
-
-            {/* Workspace border in content space */}
-            <WorkspaceBorder width={bounds.width} height={bounds.height} />
-
-            {/* Items */}
-            {renderItems.map((it) => {
-              const sel = selectedIds.includes(it.id);
-              if (it.type === 'rectangle') {
-                const { draggablePathProps, selectionWrapperProps } = calculateRectangleRenderProps(
-                  it,
-                  activeId,
-                  dragPosMm,
-                  selectionOverlayOffsetPx,
-                  getMmPerPx,
-                  rectPathData,
-                  transformForMakerPath
-                );
-                
-                return (
-                  <g key={it.id}>
-                    <DraggablePath
-                      {...draggablePathProps}
-                      selected={sel}
-                      setPathRef={setPathRef}
-                      onClick={() => selectOnly(it.id)}
-                    />
-                    {sel && (
-                      <SelectionWrapper {...selectionWrapperProps} />
-                    )}
-                  </g>
-                );
-              } else if (it.type === 'sliceLayer') {
-                const renderProps = calculateSliceLayerRenderProps(
-                  it,
-                  activeId,
-                  dragPosMm,
-                  selectionOverlayOffsetPx,
-                  getMmPerPx,
-                  transformForMakerPath
-                );
-                
-                if (!renderProps) return null;
-                
-                const { draggablePathProps, selectionWrapperProps, posX, posY, width, height } = renderProps;
-                
-                return (
-                  <g key={it.id}>
-                    <DraggablePath
-                      {...draggablePathProps}
-                      selected={sel}
-                      setPathRef={setPathRef}
-                      onClick={() => selectOnly(it.id)}
-                    />
-                    {sel && (
-                      <>
-                        <SelectionWrapper {...selectionWrapperProps} />
-                        {/* Debug: show where we think the geometry should be */}
-                        <rect 
-                          x={posX} 
-                          y={posY - (height + (height/2))} 
-                          width={width} 
-                          height={height} 
-                          fill="none" 
-                          stroke="lime" 
-                          strokeWidth="2" 
-                          strokeDasharray="5,5"
-                          opacity="0.7"
-                        />
-                        <text x={posX + 5} y={posY - 5} fontSize="12" fill="lime">{posX.toFixed(1)}, {posY.toFixed(1)}</text>
-                      </>
-                    )}
-                  </g>
-                );
-              }
-              return null;
-            })}
+      {/* Main workspace area */}
+      <Box style={{ flex: 1, position: 'relative' }}>
+        <DndContext sensors={sensors} onDragStart={onDragStart} onDragMove={onDragMove} onDragEnd={onDragEnd}>
+          <WorkspaceSvg
+            ref={svgRef as any}
+            bounds={bounds}
+            isPanning={isPanning}
+            onClearSelection={() => selectOnly(null)}
+            // onWheel removed - handled by non-passive listener in useEffect
+            onPointerDown={onPointerDown}
+            onPointerMove={onPointerMove}
+            onPointerUp={onPointerUp}
+            onClick={handleDebugClick}
+          >
             
-            {/* Debug click markers */}
+            {/* Pan/Zoom group in mm */}
+            <g ref={contentGroupRef} transform={`translate(${viewport.pan.x} ${viewport.pan.y}) scale(${viewport.zoom})`}>
+              {/* Grid */}
+              <WorkspaceGrid bounds={bounds} grid={grid} />
+
+              {/* Workspace border in content space */}
+              <WorkspaceBorder width={bounds.width} height={bounds.height} />
+
+              {/* Items */}
+              {renderItems.map((renderItem) => {
+                const isSelected = selectedIds.includes(renderItem.id);
+                if (renderItem.type === 'rectangle') {
+                  const { draggablePathProps, selectionWrapperProps } = calculateRectangleRenderProps(
+                    renderItem,
+                    activeId,
+                    dragPosMm,
+                    selectionOverlayOffsetPx,
+                    getMmPerPx,
+                    rectPathData,
+                    transformForMakerPath
+                  );
+                  
+                  return (
+                    <g key={renderItem.id}>
+                      <DraggablePath
+                        {...draggablePathProps}
+                        selected={isSelected}
+                        setPathRef={setPathRef}
+                        onClick={() => selectOnly(renderItem.id)}
+                      />
+                      {isSelected && (
+                        <SelectionWrapper {...selectionWrapperProps} />
+                      )}
+                    </g>
+                  );
+                } else if (renderItem.type === 'sliceLayer') {
+                  const renderProps = calculateSliceLayerRenderProps(
+                    renderItem,
+                    activeId,
+                    dragPosMm,
+                    selectionOverlayOffsetPx,
+                    getMmPerPx,
+                    transformForMakerPath
+                  );
+                  
+                  if (!renderProps) return null;
+                  
+                  const { draggablePathProps, selectionWrapperProps, posX, posY, width, height } = renderProps;
+                  
+                  return (
+                    <g key={renderItem.id}>
+                      <DraggablePath
+                        {...draggablePathProps}
+                        selected={isSelected}
+                        setPathRef={setPathRef}
+                        onClick={() => selectOnly(renderItem.id)}
+                      />
+                      {isSelected && <SelectionWrapper {...selectionWrapperProps} />}
+                    </g>
+                  );
+                }
+                return null;
+              })}
+              
+              {/* Debug click markers */}
+              {debugClicks.map((click, i) => (
+                <DebugMarker key={i} world={click.world} label={click.label} />
+              ))}
+            </g>
+          </WorkspaceSvg>
+        </DndContext>
+        
+        {/* Debug clicks overlay */}
+        {debugClicks.length > 0 && (
+          <Box
+            style={{
+              position: 'absolute',
+              top: 20,
+              left: 10,
+              width: 400,
+              backgroundColor: 'white',
+              opacity: 0.9,
+              border: '1px solid purple',
+              pointerEvents: 'none',
+              padding: 5,
+              zIndex: 1000
+            }}
+          >
+            <div style={{ 
+              fontSize: 12, 
+              color: 'purple', 
+              fontWeight: 'bold',
+              userSelect: 'text',
+              marginBottom: 5
+            }}>
+              Debug Clicks (Shift+Click to add, Shift+C to clear):
+            </div>
             {debugClicks.map((click, i) => (
-              <g key={i} pointerEvents="none">
-                {/* World space marker */}
-                <circle 
-                  cx={click.world.x} 
-                  cy={click.world.y} 
-                  r="3" 
-                  fill="purple" 
-                  opacity="0.8" 
-                />
-                <text 
-                  x={click.world.x + 5} 
-                  y={click.world.y - 5} 
-                  fontSize="12" 
-                  fill="purple"
-                  fontWeight="bold"
-                  style={{ userSelect: 'text' }}
-                >
-                  {click.label} (World: {click.world.x.toFixed(1)}, {click.world.y.toFixed(1)})
-                </text>
-              </g>
+              <div 
+                key={i} 
+                style={{ 
+                  fontSize: 11, 
+                  color: 'black', 
+                  userSelect: 'text',
+                  marginBottom: 3
+                }}
+              >
+                {click.label}: Screen({click.screen.x.toFixed(0)}, {click.screen.y.toFixed(0)}) → World({click.world.x.toFixed(1)}, {click.world.y.toFixed(1)})
+              </div>
             ))}
-          </g>
-        </WorkspaceSvg>
-      </DndContext>
-      {/* Screen space debug info overlay */}
-      {debugClicks.length > 0 && (
+          </Box>
+        )}
+        
+        {/* Performance HUD toggle */}
+        <Box style={{ position: 'absolute', top: 8, right: 8, zIndex: 1001 }}>
+          <Button
+            onClick={() => setUi({ showPerfHud: !showPerfHud })}
+            size="xs"
+            variant="outline"
+          >
+            {showPerfHud ? 'Hide' : 'Show'} Performance
+          </Button>
+        </Box>
+      </Box>
+      
+      {/* Performance HUD accordion - positioned beneath workspace */}
+      <Collapse in={showPerfHud}>
         <Box
           style={{
-            position: 'absolute',
-            top: 20,
-            left: 10,
-            width: 400,
-            backgroundColor: 'white',
-            opacity: 0.9,
-            border: '1px solid purple',
-            pointerEvents: 'none',
-            padding: 5,
+            backgroundColor: 'rgba(0, 0, 0, 0.8)',
+            color: 'white',
+            padding: '12px',
+            borderRadius: '4px',
+            fontSize: '12px',
+            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
             zIndex: 1000
           }}
         >
-          <div style={{ 
-            fontSize: 12, 
-            color: 'purple', 
-            fontWeight: 'bold',
-            userSelect: 'text',
-            marginBottom: 5
-          }}>
-            Debug Clicks (Shift+Click to add, Shift+C to clear):
-          </div>
-          {debugClicks.map((click, i) => (
-            <div 
-              key={i} 
-              style={{ 
-                fontSize: 11, 
-                color: 'black', 
-                userSelect: 'text',
-                marginBottom: 3
-              }}
-            >
-              {click.label}: Screen({click.screen.x.toFixed(0)}, {click.screen.y.toFixed(0)}) → World({click.world.x.toFixed(1)}, {click.world.y.toFixed(1)})
-            </div>
-          ))}
+          <WorkspacePerfHud
+            fps={fps}
+            itemsCount={items.length}
+            selectedCount={selectedIds.length}
+            zoom={viewport.zoom}
+            pan={viewport.pan}
+            selectedItemJson={selectedItemJson}
+            selectedSliceLayer={selectedSliceLayer}
+            debugClicks={debugClicks}
+          />
         </Box>
-      )}
-      {showPerfHud && (
-        <WorkspacePerfHud
-          fps={fps}
-          itemsCount={items.length}
-          selectedCount={selectedIds.length}
-          zoom={viewport.zoom}
-          pan={viewport.pan}
-          selectedItemJson={selectedItemJson}
-        />
-      )}
+      </Collapse>
     </Box>
   );
 }

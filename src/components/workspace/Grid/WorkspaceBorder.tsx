@@ -1,7 +1,7 @@
 "use client";
 
 import React from 'react';
-import { BORDER_STROKE } from './workspaceConstants';
+import { BORDER_STROKE } from '../workspaceConstants';
 
 export type WorkspaceBorderProps = {
   width: number;

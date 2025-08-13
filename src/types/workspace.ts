@@ -44,6 +44,8 @@ export type WorkspaceItem =
       position: { x: number; y: number; z?: number }; // mm top-left (z optional for 2D items)
       zIndex: number;
       locked?: boolean;
+      // Optional laser operation assignment for laser workflow coloring
+      operationId?: string | null;
       rect: RectangleParams;
     }
   | {
@@ -52,11 +54,21 @@ export type WorkspaceItem =
       position: { x: number; y: number; z?: number }; // Real-world coordinates (z optional for consistency)
       zIndex: number;
       locked?: boolean;
+      // Optional laser operation assignment for laser workflow coloring
+      operationId?: string | null;
       layer: SliceLayerParams;
     };
 
 
 
+
+export type LaserOperation = {
+  id: string;           // internal unique id
+  key: string;          // stable key like 'cut', 'engrave', 'score', 'meta'
+  label: string;        // user-visible label
+  color: string;        // stroke color (hex)
+  isMeta?: boolean;     // reserved internal use (not assignable/exported)
+};
 
 export type SelectionState = {
   selectedIds: string[];
@@ -69,6 +81,7 @@ export type WorkspaceState = {
   items: WorkspaceItem[];
   selection: SelectionState;
   ui: UiSettings;
+  operations: LaserOperation[]; // laser operation palette (includes reserved Meta)
 };
 
 export type UiSettings = {

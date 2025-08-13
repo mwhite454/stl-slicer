@@ -8,7 +8,8 @@ import type {
   ViewportState,
   Units,
   UiSettings,
-  SliceLayerParams
+  SliceLayerParams,
+  LaserOperation
 } from '@/types/workspace';
 import type { MakerJSModel } from '@/lib/coords';
 
@@ -17,6 +18,7 @@ export type WorkspaceActions = {
   addRectangle: (params: { width: number; height: number; x?: number; y?: number }) => void;
   addManyRectangles: (params: { count: number; width: number; height: number; margin?: number }) => void;
   updateItemPosition: (id: string, x: number, y: number) => void;
+  assignOperation: (id: string, operationId: string | null) => void;
   deleteItem: (id: string) => void;
   clearItems: () => void;
 
@@ -66,6 +68,11 @@ export type WorkspaceActions = {
   setGrid: (grid: Partial<GridSettings>) => void;
   setBounds: (bounds: Bounds) => void;
   setBedSize: (bounds: Bounds) => void; // convenience to update both ui.bedSizeMm and bounds
+
+  // operations
+  addOperation: (op: Omit<LaserOperation, 'id' | 'isMeta'> & { id?: string; isMeta?: boolean }) => void;
+  updateOperation: (id: string, updates: Partial<Omit<LaserOperation, 'id' | 'isMeta'>>) => void;
+  removeOperation: (id: string) => void; // cannot remove meta
 };
 
 export type WorkspaceStore = WorkspaceState & WorkspaceActions;
@@ -88,21 +95,31 @@ const DEFAULT_UI: UiSettings = {
   fitToBoundsRequestId: 0,
 };
 
+// Seed an initial Mantine-like operation palette
+const DEFAULT_OPERATIONS: LaserOperation[] = [
+  { id: 'op-meta', key: 'meta', label: 'Meta', color: '#868e96', isMeta: true }, // gray[6]
+  { id: 'op-cut', key: 'cut', label: 'Cut', color: '#fa5252' }, // red[6]
+  { id: 'op-engrave', key: 'engrave', label: 'Engrave', color: '#228be6' }, // blue[6]
+  { id: 'op-score', key: 'score', label: 'Score', color: '#7048e8' }, // violet/grape[6]
+];
+
 export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
   bounds: DEFAULT_UI.bedSizeMm,
   grid: DEFAULT_GRID,
   viewport: DEFAULT_VIEWPORT,
   ui: DEFAULT_UI,
+  operations: DEFAULT_OPERATIONS,
   items: [],
   selection: { selectedIds: [] },
 
-  addRectangle: ({ width, height, x = 0, y = 0 }) =>
+  addRectangle: ({ width, height, x = 20, y = 10 }) =>
     set((state) => {
       const item: WorkspaceItem = {
         id: nanoid(),
         type: 'rectangle',
         position: { x, y, z: 0 },
         zIndex: state.items.length,
+        operationId: null,
         rect: { width, height },
       };
       return { items: [...state.items, item] };
@@ -149,6 +166,11 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
       items: state.items.map((it) => (it.id === id ? { ...it, position: { x, y } } : it)),
     })),
 
+  assignOperation: (id, operationId) =>
+    set((state) => ({
+      items: state.items.map((it) => (it.id === id ? { ...it, operationId } : it)),
+    })),
+
   deleteItem: (id) => set((state) => ({ items: state.items.filter((it) => it.id !== id) })),
   clearItems: () => set({ items: [], selection: { selectedIds: [] } }),
 
@@ -185,6 +207,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
         type: 'sliceLayer',
         position: { x, y, z },
         zIndex: state.items.length,
+        operationId: null,
         layer: {
           makerJsModel,
           layerIndex,
@@ -213,6 +236,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
             z: layerData.z || layerData.zCoordinate 
           },
           zIndex: items.length + index,
+          operationId: null,
           layer: {
             makerJsModel: layerData.makerJsModel,
             layerIndex: layerData.layerIndex,
@@ -241,5 +265,30 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
         }
         return item;
       })
-    }))
+    })),
+
+  // operations
+  addOperation: (op) =>
+    set((state) => {
+      // prevent duplicate key
+      if (state.operations.some((o) => o.key === op.key)) return {} as any;
+      const id = op.id ?? nanoid();
+      const isMeta = op.isMeta ?? false;
+      const next: LaserOperation = { id, key: op.key, label: op.label, color: op.color, isMeta };
+      return { operations: [...state.operations, next] };
+    }),
+  updateOperation: (id, updates) =>
+    set((state) => ({
+      operations: state.operations.map((o) => (o.id === id || o.key === id ? { ...o, ...updates } : o)),
+    })),
+  removeOperation: (id) =>
+    set((state) => {
+      const op = state.operations.find((o) => o.id === id || o.key === id);
+      if (!op) return {} as any;
+      if (op.isMeta) return {} as any; // disallow removing meta
+      const remaining = state.operations.filter((o) => o !== op);
+      // Clear operationId on items referencing removed op
+      const items = state.items.map((it) => (it.operationId === op.id || it.operationId === op.key ? { ...it, operationId: null } : it));
+      return { operations: remaining, items };
+    }),
 }));

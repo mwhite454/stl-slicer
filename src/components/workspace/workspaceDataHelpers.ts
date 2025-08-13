@@ -31,8 +31,26 @@ export function calculateRectangleBounds(item: Extract<WorkspaceItem, { type: 'r
 
 /**
  * Calculates the bounding box for a slice layer workspace item
+ * Uses the bounding rectangle from model metadata if available, falls back to extents
  */
 export function calculateSliceLayerBounds(item: Extract<WorkspaceItem, { type: 'sliceLayer' }>): BoundingBox {
+  // Check if we have bounding rectangle metadata from the model
+  const model = item.layer.makerJsModel;
+  const boundingRect = (model as any)?.meta?.boundingRect;
+  
+  if (boundingRect) {
+    // Use the bounding rectangle for consistent selection handling
+    return {
+      minX: boundingRect.bounds.minX,
+      minY: boundingRect.bounds.minY,
+      maxX: boundingRect.bounds.maxX,
+      maxY: boundingRect.bounds.maxY,
+      width: boundingRect.width,
+      height: boundingRect.height
+    };
+  }
+  
+  // Fallback to measuring extents if no bounding rectangle
   const extRaw = makerjs.measure.modelExtents(item.layer.makerJsModel);
   if (!extRaw) {
     return {
@@ -51,20 +69,14 @@ export function calculateSliceLayerBounds(item: Extract<WorkspaceItem, { type: '
   const minV = planeAware ? (metaExt?.minV ?? extRaw.low[1]) : extRaw.low[1];
   const maxU = planeAware ? (metaExt?.maxU ?? extRaw.high[0]) : extRaw.high[0];
   const maxV = planeAware ? (metaExt?.maxV ?? extRaw.high[1]) : extRaw.high[1];
-  const w = Math.max(0, maxU - minU);
-  const h = Math.max(0, maxV - minV);
-  const x1 = item.position.x;
-  const y1 = item.position.y;
-  const x2 = x1 + w;
-  const y2 = y1 + h;
   
   return {
-    minX: x1,
-    minY: y1,
-    maxX: x2,
-    maxY: y2,
-    width: w,
-    height: h
+    minX: minU,
+    minY: minV,
+    maxX: maxU,
+    maxY: maxV,
+    width: Math.max(0, maxU - minU),
+    height: Math.max(0, maxV - minV)
   };
 }
 
@@ -113,6 +125,23 @@ export function applyMarginToBounds(bounds: BoundingBox, margin: number): Boundi
     width: bounds.width + 2 * margin,
     height: bounds.height + 2 * margin
   };
+}
+
+export function calculateBoundsFromPaths(paths: Array<Array<THREE.Vector2>>): BoundingBox {
+  let bounds = initializeBounds();
+  for (let i = 0; i < paths.length; i += 1) {
+    const path = paths[i];
+    if (path.length < 2) continue;
+    
+    for (let j = 0; j < path.length; j += 1) {
+      const point = path[j];
+      bounds.minX = Math.min(bounds.minX, point.x);
+      bounds.minY = Math.min(bounds.minY, point.y);
+      bounds.maxX = Math.max(bounds.maxX, point.x);
+      bounds.maxY = Math.max(bounds.maxY, point.y);
+    }
+  }
+  return bounds;
 }
 
 /**
