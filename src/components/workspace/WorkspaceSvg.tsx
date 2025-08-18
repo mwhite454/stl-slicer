@@ -11,12 +11,13 @@ export type WorkspaceSvgProps = {
   onPointerMove: React.PointerEventHandler<SVGSVGElement>;
   onPointerUp: React.PointerEventHandler<SVGSVGElement>;
   onClick?: React.MouseEventHandler<SVGSVGElement>;
+  onClickCapture?: React.MouseEventHandler<SVGSVGElement>;
   children: React.ReactNode;
 };
 
 export const WorkspaceSvg = forwardRef<SVGSVGElement, WorkspaceSvgProps>(
   (
-    { bounds, isPanning, onClearSelection, onWheel, onPointerDown, onPointerMove, onPointerUp, onClick, children },
+    { bounds, isPanning, onClearSelection, onWheel, onPointerDown, onPointerMove, onPointerUp, onClick, onClickCapture, children },
     ref,
   ) => (
     <svg
@@ -34,6 +35,7 @@ export const WorkspaceSvg = forwardRef<SVGSVGElement, WorkspaceSvgProps>(
         cursor: isPanning ? 'grabbing' : undefined,
       }}
       className="workspace-svg"
+      onClickCapture={onClickCapture}
       onClick={(e) => {
         onClick?.(e);
         if (!e.defaultPrevented) onClearSelection();

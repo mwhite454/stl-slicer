@@ -186,8 +186,6 @@ function StlSlicerContent() {
           axisMap: m.axisMap,
           vUpSign: m.vUpSign,
           uvExtents: m.uvExtents,
-          x: 0,
-          y: 0,
           z: m.zCoordinate,
         }));
         workspaceStore.addMultipleSliceLayers(layersToAdd);

@@ -103,4 +103,5 @@ export type UiSettings = {
   bedSizeMm: Bounds; // user-configurable workspace bed size in mm
   showPerfHud: boolean; // toggle for FPS/render HUD
   fitToBoundsRequestId: number; // increment to request fit-to-bounds from toolbar
+  disablePlaneMapping?: boolean; // when true, ignore plane/uv mapping for slice rendering
 };

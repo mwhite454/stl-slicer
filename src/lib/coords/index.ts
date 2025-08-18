@@ -67,8 +67,8 @@ export const convertMakerJsToSvgCoordinates = (
   
   // Convert all nested models recursively
   if (svgModel.models) {
-    Object.values(svgModel.models).forEach(model => {
-      convertMakerJsToSvgCoordinates(model, height);
+    Object.entries(svgModel.models).forEach(([key, model]) => {
+      (svgModel.models as any)[key] = convertMakerJsToSvgCoordinates(model, height);
     });
   }
   

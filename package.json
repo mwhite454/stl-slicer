@@ -7,7 +7,10 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "db:migrate": "node scripts/migrate.js"
+    "db:migrate": "node scripts/migrate.js",
+    "test": "jest --config jest.config.ts",
+    "test:watch": "jest --watch --config jest.config.ts",
+    "coverage": "jest --config jest.config.ts --coverage"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.10.0",
@@ -46,6 +49,10 @@
     "zustand": "^5.0.5"
   },
   "devDependencies": {
+    "@testing-library/jest-dom": "^6.7.0",
+    "@testing-library/react": "^16.3.0",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/jest": "^30.0.0",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
@@ -53,8 +60,12 @@
     "@types/svg-parser": "^2.0.6",
     "@types/svg-path-parser": "^1.1.6",
     "@types/xmldom": "^0.1.34",
+    "jest": "^30.0.5",
+    "jest-environment-jsdom": "^30.0.5",
     "prettier": "^3.5.1",
     "prisma": "^6.13.0",
+    "ts-jest": "^29.4.1",
+    "ts-node": "^10.9.2",
     "typescript": "^5"
   }
 }

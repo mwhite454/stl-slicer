@@ -33,7 +33,10 @@ export function calculateRectangleBounds(item: Extract<WorkspaceItem, { type: 'r
  * Calculates the bounding box for a slice layer workspace item
  * Uses the bounding rectangle from model metadata if available, falls back to extents
  */
-export function calculateSliceLayerBounds(item: Extract<WorkspaceItem, { type: 'sliceLayer' }>): BoundingBox {
+export function calculateSliceLayerBounds(
+  item: Extract<WorkspaceItem, { type: 'sliceLayer' }>,
+  opts?: { disablePlaneMapping?: boolean }
+): BoundingBox {
   // Check if we have bounding rectangle metadata from the model
   const model = item.layer.makerJsModel;
   const boundingRect = (model as any)?.meta?.boundingRect;
@@ -63,8 +66,9 @@ export function calculateSliceLayerBounds(item: Extract<WorkspaceItem, { type: '
     };
   }
   
-  const planeAware = Boolean(item.layer.plane);
-  const metaExt = item.layer.uvExtents;
+  const useMeta = !opts?.disablePlaneMapping;
+  const planeAware = useMeta && Boolean(item.layer.plane);
+  const metaExt = useMeta ? item.layer.uvExtents : undefined;
   const minU = planeAware ? (metaExt?.minU ?? extRaw.low[0]) : extRaw.low[0];
   const minV = planeAware ? (metaExt?.minV ?? extRaw.low[1]) : extRaw.low[1];
   const maxU = planeAware ? (metaExt?.maxU ?? extRaw.high[0]) : extRaw.high[0];
@@ -77,6 +81,39 @@ export function calculateSliceLayerBounds(item: Extract<WorkspaceItem, { type: '
     maxY: maxV,
     width: Math.max(0, maxU - minU),
     height: Math.max(0, maxV - minV)
+  };
+}
+
+/**
+ * Calculates the bounding box for a meta model workspace item
+ */
+export function calculateMetaModelBounds(
+  item: Extract<WorkspaceItem, { type: 'metaModel' }>
+): BoundingBox {
+  const extRaw = makerjs.measure.modelExtents(item.makerJsModel);
+  if (!extRaw) {
+    return {
+      minX: Infinity,
+      minY: Infinity,
+      maxX: -Infinity,
+      maxY: -Infinity,
+      width: 0,
+      height: 0
+    };
+  }
+
+  const minX = extRaw.low[0];
+  const minY = extRaw.low[1];
+  const maxX = extRaw.high[0];
+  const maxY = extRaw.high[1];
+
+  return {
+    minX,
+    minY,
+    maxX,
+    maxY,
+    width: Math.max(0, maxX - minX),
+    height: Math.max(0, maxY - minY)
   };
 }
 
@@ -142,7 +179,23 @@ export function calculateBoundsFromPaths(paths: Array<Array<Vec2>>): BoundingBox
       bounds.maxY = Math.max(bounds.maxY, point.y);
     }
   }
-  return bounds;
+  if (
+    bounds.minX === Infinity ||
+    bounds.minY === Infinity ||
+    bounds.maxX === -Infinity ||
+    bounds.maxY === -Infinity
+  ) {
+    // No valid points processed
+    return bounds;
+  }
+  return {
+    minX: bounds.minX,
+    minY: bounds.minY,
+    maxX: bounds.maxX,
+    maxY: bounds.maxY,
+    width: Math.max(0, bounds.maxX - bounds.minX),
+    height: Math.max(0, bounds.maxY - bounds.minY),
+  };
 }
 
 /**
@@ -189,8 +242,8 @@ export function calculateRectangleRenderProps(
   // Convert to centered Y-up space: x' = x - cx; y' (bottom-left) = (H - (y + h)) - cy
   const cx = bounds.width / 2;
   const cy = bounds.height / 2;
-  const xLeftCenter = (posX - ox) - cx;
-  const yBottomCenter = (bounds.height - (posY + item.rect.height) - oy) - cy;
+  const xLeftCenter = (posX - ox + item.rect.width / 2) - cx;
+  const yBottomCenter = (bounds.height - (posY + item.rect.height) - oy + item.rect.height / 2) - cy;
   const selX = xLeftCenter;
   const selY = yBottomCenter;
   
@@ -229,7 +282,8 @@ export function calculateSliceLayerRenderProps(
   selectionOverlayOffsetPx: number,
   getMmPerPx: () => { x: number; y: number },
   transformForMakerPath: (x: number, y: number, height: number) => string,
-  bounds: { width: number; height: number }
+  bounds: { width: number; height: number },
+  opts?: { disablePlaneMapping?: boolean }
 ) {
   const posX = activeId === item.id && dragPosMm ? dragPosMm.x : item.position.x;
   const posY = activeId === item.id && dragPosMm ? dragPosMm.y : item.position.y;
@@ -239,7 +293,8 @@ export function calculateSliceLayerRenderProps(
     return null;
   }
   
-  const metaExt = item.layer.uvExtents;
+  const useMeta = !opts?.disablePlaneMapping;
+  const metaExt = useMeta ? item.layer.uvExtents : undefined;
   const minU = metaExt?.minU ?? extRaw.low[0];
   const minV = metaExt?.minV ?? extRaw.low[1];
   const maxU = metaExt?.maxU ?? extRaw.high[0];
@@ -247,9 +302,10 @@ export function calculateSliceLayerRenderProps(
   const width = Math.max(0, maxU - minU);
   const height = Math.max(0, maxV - minV);
   
-  // Use the same origin shift as before to normalize coordinates
-  const origin: [number, number] = [-minU, -maxV];
-  const d = makerjs.exporter.toSVGPathData(item.layer.makerJsModel, { origin } as any) as unknown as string;
+  // Normalize origin to bottom-left extents (BL) for coherent Y-up placement
+  const origin: [number, number] = [-minU, -minV];
+  const dAny = makerjs.exporter.toSVGPathData(item.layer.makerJsModel, { origin } as any);
+  const d = (typeof dAny === 'string' ? dAny : Object.values(dAny ?? {}).join(' ')) as unknown as string;
   
   // Use SelectionWrapper with world-space coordinates
   const mmpp = getMmPerPx();
@@ -264,13 +320,27 @@ export function calculateSliceLayerRenderProps(
   const cx = bounds.width / 2;
   const cy = bounds.height / 2;
   const xLeftCenter = (posX - ox) - cx;
+  // Bottom-left placement in centered Y-up space from top-left posY
   const yBottomCenter = (bounds.height - (posY + height) - oy) - cy;
   const selX = xLeftCenter;
   const selY = yBottomCenter;
   
-  // Use the same transform that works for rectangles
-  // Place bottom-left at centered Y-up position
-  const transformStr = transformForMakerPath(xLeftCenter + ox, yBottomCenter + oy, height);
+  // Debug probe: log extents, position, transform inputs
+  try {
+    // eslint-disable-next-line no-console
+    console.log('[sliceLayer:render] useMeta=%s, disablePlaneMapping=%s, extents={minU:%d,minV:%d,maxU:%d,maxV:%d,w:%d,h:%d} pos={x:%d,y:%d} center={cx:%d,cy:%d} place={xLC:%d,yBC:%d} originBL',
+      useMeta,
+      opts?.disablePlaneMapping,
+      minU, minV, maxU, maxV, width, height,
+      posX, posY,
+      cx, cy,
+      xLeftCenter, yBottomCenter);
+  } catch {}
+
+  // Place bottom-left at centered Y-up position. Do not include selection overlay offsets in path transform.
+  // When plane mapping is disabled, we need to ensure consistent positioning
+  // The key is to use the same formula for both rendering and dragging
+  const transformStr = transformForMakerPath(xLeftCenter, yBottomCenter, height);
   
   const draggablePathProps = {
     id: item.id,
@@ -296,4 +366,40 @@ export function calculateSliceLayerRenderProps(
     width,
     height
   };
+}
+
+// Alternate debug props using bottom-left normalization to compare visually
+export function calculateSliceLayerDebugAltProps(
+  item: Extract<WorkspaceItem, { type: 'sliceLayer' }>,
+  opts: { bounds: { width: number; height: number }; posX: number; posY: number; selectionOverlayOffsetPx: number; getMmPerPx: () => { x: number; y: number }; transformForMakerPath: (x: number, y: number, height: number) => string; disablePlaneMapping?: boolean }
+) {
+  const { bounds, posX, posY, selectionOverlayOffsetPx = 6 } = opts;
+  const mmpp = opts.getMmPerPx();
+  const ox = selectionOverlayOffsetPx * mmpp.x;
+  const oy = selectionOverlayOffsetPx * mmpp.y;
+
+  const extRaw = makerjs.measure.modelExtents(item.layer.makerJsModel);
+  if (!extRaw) return null;
+  const useMeta = !opts?.disablePlaneMapping;
+  const metaExt = useMeta ? item.layer.uvExtents : undefined;
+  const minU = metaExt?.minU ?? extRaw.low[0];
+  const minV = metaExt?.minV ?? extRaw.low[1];
+  const maxU = metaExt?.maxU ?? extRaw.high[0];
+  const maxV = metaExt?.maxV ?? extRaw.high[1];
+  const width = Math.max(0, maxU - minU);
+  const height = Math.max(0, maxV - minV);
+
+  // Bottom-left normalization
+  const origin: [number, number] = [-minU, -minV];
+  const dAny = makerjs.exporter.toSVGPathData(item.layer.makerJsModel, { origin } as any);
+  const d = (typeof dAny === 'string' ? dAny : Object.values(dAny ?? {}).join(' ')) as unknown as string;
+
+  const cx = bounds.width / 2;
+  const cy = bounds.height / 2;
+  const xLeftCenter = (posX - ox + width / 2) - cx;
+  // Debug alt mirrors main formula
+  const yBottomCenter = (bounds.height - (posY + height) - oy + height / 2) - cy;
+  const transformStr = opts.transformForMakerPath(xLeftCenter, yBottomCenter, height);
+
+  return { d, transform: transformStr };
 }

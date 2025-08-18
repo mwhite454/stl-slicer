@@ -41,7 +41,7 @@ export function generateMakerGridModel(
       const keyP = `gv+${xPos.toFixed(3)}`;
       addLine(keyP, [xPos, yMin], [xPos, yMax]);
       if (x > 0) {
-        const keyN = `gv-${xNeg.toFixed(3)}`;
+        const keyN = `gv-${Math.abs(xNeg).toFixed(3)}`;
         addLine(keyN, [xNeg, yMin], [xNeg, yMax]);
       }
     }
@@ -52,7 +52,7 @@ export function generateMakerGridModel(
       const keyP = `gh+${yPos.toFixed(3)}`;
       addLine(keyP, [xMin, yPos], [xMax, yPos]);
       if (y > 0) {
-        const keyN = `gh-${yNeg.toFixed(3)}`;
+        const keyN = `gh-${Math.abs(yNeg).toFixed(3)}`;
         addLine(keyN, [xMin, yNeg], [xMax, yNeg]);
       }
     }

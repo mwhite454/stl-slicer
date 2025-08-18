@@ -99,6 +99,7 @@ const DEFAULT_UI: UiSettings = {
   bedSizeMm: DEFAULT_BOUNDS,
   showPerfHud: false,
   fitToBoundsRequestId: 0,
+  disablePlaneMapping: true,
 };
 
 // TODO(workspace-chrome): Consider adding UI settings to toggle/show workspace chrome features
@@ -212,10 +213,11 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     z = zCoordinate
   }) =>
     set((state) => {
-      // Determine extents and center position if not provided
+      // Determine extents consistently with rendering path
+      const useMeta = !state.ui.disablePlaneMapping;
       let w = 0;
       let h = 0;
-      if (uvExtents) {
+      if (useMeta && uvExtents) {
         w = Math.max(0, uvExtents.maxU - uvExtents.minU);
         h = Math.max(0, uvExtents.maxV - uvExtents.minV);
       } else {
@@ -255,9 +257,10 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
       const items: WorkspaceItem[] = [...state.items];
       layers.forEach((layerData, index) => {
         // Compute extents for centering if no x/y provided
+        const useMeta = !state.ui.disablePlaneMapping;
         let w = 0;
         let h = 0;
-        if (layerData.uvExtents) {
+        if (useMeta && layerData.uvExtents) {
           w = Math.max(0, layerData.uvExtents.maxU - layerData.uvExtents.minU);
           h = Math.max(0, layerData.uvExtents.maxV - layerData.uvExtents.minV);
         } else {

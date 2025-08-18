@@ -1,7 +1,8 @@
 "use client";
 
 import React from 'react';
-import { Box, Paper, Stack, Text } from '@mantine/core';
+import { Box, Paper, Stack, Text, Switch } from '@mantine/core';
+import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { SliceLayerCard, type SliceLayerItem } from '@/components/SliceLayerCard';
 
 export type WorkspacePerfHudProps = {
@@ -16,6 +17,14 @@ export type WorkspacePerfHudProps = {
     screen: { x: number; y: number };
     world: { x: number; y: number };
     label: string;
+    viewport: { zoom: number; pan: { x: number; y: number } };
+    sliceMeta?: {
+      plane?: 'XY' | 'YZ' | 'XZ';
+      axisMap?: { u: 'x' | 'y' | 'z'; v: 'x' | 'y' | 'z' };
+      vUpSign?: 1 | -1;
+      uvExtents?: { minU: number; minV: number; maxU: number; maxV: number };
+      slicedAxis?: 'x' | 'y' | 'z';
+    };
   }>;
 };
 
@@ -23,8 +32,10 @@ export type WorkspacePerfHudProps = {
  * Floating performance/status HUD for the workspace. Uses Mantine components to follow theme.
  */
 export function WorkspacePerfHud({ fps, itemsCount, selectedCount, zoom, pan, selectedItemJson, selectedSliceLayer, debugClicks }: WorkspacePerfHudProps) {
+  const disablePlaneMapping = useWorkspaceStore((s) => s.ui.disablePlaneMapping);
+  const setUi = useWorkspaceStore((s) => s.setUi);
   return (
-    <Box style={{ position: 'absolute', top: 8, right: 8, pointerEvents: 'none' }}>
+    <Box style={{ width: '100%' }}>
       <Paper shadow="md" radius="md" p="xs" style={{ background: 'rgba(0,0,0,0.6)' }}>
         <Stack gap={2} style={{ lineHeight: 1.2 }}>
           <Text c="white" size="xs">FPS: {fps}</Text>
@@ -32,10 +43,18 @@ export function WorkspacePerfHud({ fps, itemsCount, selectedCount, zoom, pan, se
           <Text c="white" size="xs">Sel: {selectedCount}</Text>
           <Text c="white" size="xs">Zoom: {zoom.toFixed(2)}</Text>
           <Text c="white" size="xs">Pan: {pan.x.toFixed(1)}, {pan.y.toFixed(1)}</Text>
+          <Switch
+            size="xs"
+            color="cyan"
+            styles={{ label: { color: 'white' } }}
+            label="Disable Plane Mapping"
+            checked={disablePlaneMapping}
+            onChange={(e) => setUi({ disablePlaneMapping: e.currentTarget.checked })}
+          />
         </Stack>
       </Paper>
       {(selectedSliceLayer || selectedItemJson) && (
-        <Paper shadow="sm" radius="md" p="xs" mt={8} style={{ background: 'rgba(0,0,0,0.7)', pointerEvents: 'auto' }}>
+        <Paper shadow="sm" radius="md" p="xs" mt={8} style={{ background: 'rgba(0,0,0,0.7)' }}>
           <Text c="white" size="xs" fw={600} mb={4}>Selected Item</Text>
           {selectedSliceLayer ? (
             <Box style={{ maxWidth: 460 }}>
@@ -60,7 +79,7 @@ export function WorkspacePerfHud({ fps, itemsCount, selectedCount, zoom, pan, se
         </Paper>
       )}
       {debugClicks.length > 0 && (
-        <Paper shadow="sm" radius="md" p="xs" mt={8} style={{ background: 'rgba(0,0,0,0.7)', pointerEvents: 'auto' }}>
+        <Paper shadow="sm" radius="md" p="xs" mt={8} style={{ background: 'rgba(0,0,0,0.7)' }}>
           <Text c="white" size="xs" fw={600} mb={4}>Debug Clicks</Text>
           <Stack gap={2}>
             {debugClicks.map((click, i) => (
@@ -68,6 +87,29 @@ export function WorkspacePerfHud({ fps, itemsCount, selectedCount, zoom, pan, se
                 <Text c="white" size="xs">
                   {click.label}: Screen({click.screen.x.toFixed(0)}, {click.screen.y.toFixed(0)}) → World({click.world.x.toFixed(1)}, {click.world.y.toFixed(1)})
                 </Text>
+                <Text c="white" size="xs">
+                  Viewport: zoom {click.viewport.zoom.toFixed(2)}, pan({click.viewport.pan.x.toFixed(1)}, {click.viewport.pan.y.toFixed(1)})
+                </Text>
+                {click.sliceMeta && (
+                  <Box ml={8}>
+                    <Text c="white" size="xs">Plane: {click.sliceMeta.plane ?? 'n/a'} | SlicedAxis: {click.sliceMeta.slicedAxis ?? 'n/a'}</Text>
+                    {click.sliceMeta.axisMap && (
+                      <Text c="white" size="xs">AxisMap: u→{click.sliceMeta.axisMap.u}, v→{click.sliceMeta.axisMap.v}</Text>
+                    )}
+                    {typeof click.sliceMeta.vUpSign !== 'undefined' && (
+                      <Text c="white" size="xs">vUpSign: {click.sliceMeta.vUpSign}</Text>
+                    )}
+                    {click.sliceMeta.uvExtents && (
+                      <Text c="white" size="xs">
+                        uvExtents: [
+                        {click.sliceMeta.uvExtents.minU.toFixed(2)},
+                        {click.sliceMeta.uvExtents.minV.toFixed(2)}] → [
+                        {click.sliceMeta.uvExtents.maxU.toFixed(2)},
+                        {click.sliceMeta.uvExtents.maxV.toFixed(2)}]
+                      </Text>
+                    )}
+                  </Box>
+                )}
               </Box>
             ))}
           </Stack>
