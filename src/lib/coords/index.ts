@@ -9,10 +9,10 @@ export function makerYFromSvg(ySvg: number, refHeightMm: number): number {
   return refHeightMm - ySvg;
 }
 
-// For maker.js-generated path data where local origin is at (0,0) and height extends in +Y (maker space),
-// render correctly in SVG by translating by (x, y + height) without a scale flip.
-export function transformForMakerPath(xMm: number, yMm: number, heightMm: number): string {
-  return `translate(${xMm} ${yMm + heightMm})`;
+// For maker.js path data in a parent that is already Y-up (we flip the stage),
+// we only need a simple translate by (x, y) in mm.
+export function transformForMakerPath(xMm: number, yMm: number, _heightMm: number): string {
+  return `translate(${xMm} ${yMm})`;
 }
 
 export type Point = { x: number; y: number };
@@ -67,8 +67,8 @@ export const convertMakerJsToSvgCoordinates = (
   
   // Convert all nested models recursively
   if (svgModel.models) {
-    Object.values(svgModel.models).forEach(model => {
-      convertMakerJsToSvgCoordinates(model, height);
+    Object.entries(svgModel.models).forEach(([key, model]) => {
+      (svgModel.models as any)[key] = convertMakerJsToSvgCoordinates(model, height);
     });
   }
   

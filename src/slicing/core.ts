@@ -210,7 +210,9 @@ export function sliceGeometry(
 
   const minLayers = 2;
   const count = Math.max(minLayers, total > 0 && layerThickness > 0 ? Math.ceil(total / layerThickness) : minLayers);
-  const adjusted = count > 1 ? total / (count - 1) : 0;
+  // Compute spacing without branching; when count=1 (not expected due to minLayers), steps becomes 1, which is safe
+  const steps = Math.max(1, count - 1);
+  const adjusted = total / steps;
 
   const plane = planeFromAxis(axis);
   const axisMap = axisMapForPlane(plane);

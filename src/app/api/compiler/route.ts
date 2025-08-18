@@ -15,8 +15,10 @@ export const POST = async (req: NextRequest) => {
     const uploadedFiles: string[] = [];
 
     for (const [key, value] of formData.entries()) {
-      if (value instanceof File) {
-        const file = value;
+      // Accept any File/Blob-like object that has name and arrayBuffer
+      const v: any = value as any;
+      if (v && typeof v.name === 'string' && typeof v.arrayBuffer === 'function') {
+        const file = v as unknown as File;
         const buffer = Buffer.from(await file.arrayBuffer());
         const filePath = path.resolve(UPLOAD_DIR, file.name);
 

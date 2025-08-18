@@ -1,27 +1,38 @@
 "use client";
 
 import React, { useMemo, useRef, useState, useEffect } from 'react';
-import { Box } from '@mantine/core';
+import { Box, Collapse, Button } from '@mantine/core';
 import { useElementSize } from '@mantine/hooks';
-import { useWorkspaceStore } from '@/stores/workspaceStore';
+import {
+  useWorkspaceStore,
+} from '@/stores/workspaceStore';
 import { rectPathData } from '@/lib/maker/generateSvgPath';
 import { transformForMakerPath } from '@/lib/coords';
 import makerjs from 'makerjs';
+import type { MakerJSModel } from '@/lib/coords';
 import { DndContext, DragEndEvent, DragMoveEvent, DragStartEvent, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { WorkspaceSvg } from '@/components/workspace/WorkspaceSvg';
 import { DraggablePath } from './DraggablePath';
 import { SelectionWrapper } from './SelectionWrapper';
-import { WorkspaceBorder } from './WorkspaceBorder';
+// Border is now rendered from Maker.js meta model
 import { WorkspacePerfHud } from './WorkspacePerfHud';
-import { MAX_ZOOM, MIN_ZOOM, WHEEL_ZOOM_SENSITIVITY, GRID_LINE_STROKE, MIN_POSITION_MM, DIRECTION_KEY_MAP, NUDGE_MIN_MM, FIT_MARGIN_MM, BORDER_STROKE, MIN_SPEED_MULT } from './workspaceConstants';
-import { calculateRectangleBounds, calculateSliceLayerBounds, updateBounds, initializeBounds, applyMarginToBounds, calculateFitZoom, calculateCenterPan, calculateRectangleRenderProps, calculateSliceLayerRenderProps } from './workspaceDataHelpers';
+// import WorkspaceGrid from './Grid/WorkspaceGrid'; // replaced by maker.js meta grid
+import { generateMakerGridModel } from '@/lib/maker/generateGridModel';
+import { generateMakerWorkspaceModel } from '@/lib/maker/generateWorkspaceModel';
+import { DebugMarker } from './Debug/DebugMarker';
+import { MAX_ZOOM, MIN_ZOOM, WHEEL_ZOOM_SENSITIVITY, MIN_POSITION_MM, DIRECTION_KEY_MAP, NUDGE_MIN_MM, FIT_MARGIN_MM , MIN_SPEED_MULT, BORDER_STROKE } from './workspaceConstants';
+import { calculateSliceLayerDebugAltProps } from './workspaceDataHelpers';
+import { calculateRectangleBounds, calculateSliceLayerBounds, calculateMetaModelBounds, updateBounds, initializeBounds, applyMarginToBounds, calculateFitZoom, calculateCenterPan, calculateRectangleRenderProps, calculateSliceLayerRenderProps } from './workspaceDataHelpers';
 
 type DragOrigin = { id: string; x0: number; y0: number } | null;
 
 export function WorkspaceStage({ visibleItemIds }: { visibleItemIds?: string[] }) {
-  const bounds = useWorkspaceStore((s) => s.bounds);
+  const ui = useWorkspaceStore((s) => s.ui);
   const grid = useWorkspaceStore((s) => s.grid);
+  const bounds = useWorkspaceStore((s) => s.bounds);
   const viewport = useWorkspaceStore((s) => s.viewport);
+  const upsertMetaGrid = useWorkspaceStore((s) => s.upsertMetaGrid);
+  const upsertMetaWorkspace = useWorkspaceStore((s) => s.upsertMetaWorkspace);
   const items = useWorkspaceStore((s) => s.items);
   const selectedIds = useWorkspaceStore((s) => s.selection.selectedIds);
   const selectOnly = useWorkspaceStore((s) => s.selectOnly);
@@ -33,6 +44,7 @@ export function WorkspaceStage({ visibleItemIds }: { visibleItemIds?: string[] }
   const panSpeedMultiplier = useWorkspaceStore((s) => s.ui.panSpeedMultiplier);
   const zoomSpeedMultiplier = useWorkspaceStore((s) => s.ui.zoomSpeedMultiplier);
   const showPerfHud = useWorkspaceStore((s) => s.ui.showPerfHud);
+  const setUi = useWorkspaceStore((s) => s.setUi);
   const fitToBoundsRequestId = useWorkspaceStore((s) => s.ui.fitToBoundsRequestId);
   const nudgeDistanceMm = useWorkspaceStore((s) => s.ui.nudgeDistanceMm);
 
@@ -58,6 +70,14 @@ export function WorkspaceStage({ visibleItemIds }: { visibleItemIds?: string[] }
     screen: { x: number; y: number };
     world: { x: number; y: number };
     label: string;
+    viewport: { zoom: number; pan: { x: number; y: number } };
+    sliceMeta?: {
+      plane?: 'XY' | 'YZ' | 'XZ';
+      axisMap?: { u: 'x' | 'y' | 'z'; v: 'x' | 'y' | 'z' };
+      vUpSign?: 1 | -1;
+      uvExtents?: { minU: number; minV: number; maxU: number; maxV: number };
+      slicedAxis?: 'x' | 'y' | 'z';
+    };
   }>>([]);
   // Imperative group refs for high-FPS drag updates without React re-renders
   const pathRefs = useRef<Map<string, SVGGraphicsElement>>(new Map());
@@ -65,6 +85,41 @@ export function WorkspaceStage({ visibleItemIds }: { visibleItemIds?: string[] }
     if (el) pathRefs.current.set(id, el);
     else pathRefs.current.delete(id);
   };
+
+  // Map screen-space delta (px) to content mm using inverse CTM of content group
+  const deltaPxToMm = (dxPx: number, dyPx: number) => {
+    const g = contentGroupRef.current;
+    const m = g?.getScreenCTM();
+    if (!m) {
+      const s = getMmPerPx();
+      return { x: dxPx * s.x, y: dyPx * s.y };
+    }
+    const det = m.a * m.d - m.b * m.c;
+    if (!det) {
+      const s = getMmPerPx();
+      return { x: dxPx * s.x, y: dyPx * s.y };
+    }
+    // Inverse of 2x2 [a c; b d] applied to vector
+    const ia = m.d / det;
+    const ib = -m.b / det;
+    const ic = -m.c / det;
+    const id = m.a / det;
+    return { x: ia * dxPx + ic * dyPx, y: ib * dxPx + id * dyPx };
+  };
+
+  // Generate maker.js grid and workspace meta models whenever bounds or grid change
+  // TODO(workspace-chrome): If/when adding rulers/background/safe-margins, extend the
+  // workspace model here (generateMakerWorkspaceModel) with feature flags/settings from store UI.
+  useEffect(() => {
+    if (!grid.show) {
+      // Keep simple for now: do not remove; could call removeMetaByType('grid')
+      return;
+    }
+    const gridModel = generateMakerGridModel(bounds.width, bounds.height, grid.size);
+    upsertMetaGrid(gridModel as unknown as MakerJSModel);
+    const workspaceModel = generateMakerWorkspaceModel(bounds.width, bounds.height);
+    upsertMetaWorkspace(workspaceModel as unknown as MakerJSModel);
+  }, [bounds.width, bounds.height, grid.size, grid.show, upsertMetaGrid, upsertMetaWorkspace]);
 
   // Debug toggles removed after finalizing plane-aware transform/origin pairing
 
@@ -79,6 +134,15 @@ export function WorkspaceStage({ visibleItemIds }: { visibleItemIds?: string[] }
     } catch (_e) {
       return null;
     }
+  }, [selectedIds, items]);
+
+  // Selected sliceLayer item for Perf HUD card
+  const selectedSliceLayer = useMemo(() => {
+    const id = selectedIds[0];
+    if (!id) return null;
+    const it = items.find((x) => x.id === id);
+    if (!it || it.type !== 'sliceLayer') return null;
+    return it;
   }, [selectedIds, items]);
 
   // Removed metrics debug effect after alignment finalized
@@ -112,25 +176,53 @@ export function WorkspaceStage({ visibleItemIds }: { visibleItemIds?: string[] }
   };
 
   // Debug: Handle click for coordinate debugging
-  const handleDebugClick = (e: React.MouseEvent) => {
+  const handleDebugClick = (e: React.MouseEvent<SVGSVGElement>) => {
     if (!e.shiftKey) return; // Only capture with Shift+Click
-    
+    // Prevent default so `WorkspaceSvg` does not clear selection
+    e.preventDefault();
     const rect = (e.currentTarget as SVGElement).getBoundingClientRect();
     const screenX = e.clientX - rect.left;
     const screenY = e.clientY - rect.top;
     const worldPos = clientToMm(e.clientX, e.clientY);
-    
+    const g = contentGroupRef.current;
+    const ctm = g?.getScreenCTM?.();
     if (worldPos) {
+      // Capture selected sliceLayer metadata at click time
+      const selId = useWorkspaceStore.getState().selection.selectedIds[0];
+      const sel = selId ? useWorkspaceStore.getState().items.find((x) => x.id === selId) : undefined;
+      const planeVal = sel && sel.type === 'sliceLayer' ? sel.layer.plane : undefined;
+      const plane: 'XY' | 'YZ' | 'XZ' | undefined =
+        planeVal === 'XY' || planeVal === 'YZ' || planeVal === 'XZ' ? planeVal : undefined;
+      const slicedAxis: 'x' | 'y' | 'z' | undefined =
+        plane === 'XY' ? 'z' : plane === 'YZ' ? 'x' : plane === 'XZ' ? 'y' : undefined;
+      const sliceMeta = sel && sel.type === 'sliceLayer' ? {
+        plane,
+        axisMap: sel.layer.axisMap as { u: 'x' | 'y' | 'z'; v: 'x' | 'y' | 'z' } | undefined,
+        vUpSign: sel.layer.vUpSign as 1 | -1 | undefined,
+        uvExtents: sel.layer.uvExtents,
+        slicedAxis,
+      } : undefined;
       const clickNumber = debugClicks.length + 1;
       const label = `Click ${clickNumber}`;
-      setDebugClicks(prev => [...prev, {
-        screen: { x: screenX, y: screenY },
-        world: worldPos,
-        label
-      }]);
+      setDebugClicks([
+        ...debugClicks,
+        {
+          screen: { x: screenX, y: screenY },
+          world: worldPos,
+          label,
+          viewport: { zoom: useWorkspaceStore.getState().viewport.zoom, pan: { ...useWorkspaceStore.getState().viewport.pan } },
+          sliceMeta,
+        },
+      ]);
+      // eslint-disable-next-line no-console
       console.log(`Debug ${label}:`, {
+        svgRect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
         screen: { x: screenX.toFixed(1), y: screenY.toFixed(1) },
-        world: { x: worldPos.x.toFixed(2), y: worldPos.y.toFixed(2) }
+        world: { x: worldPos.x.toFixed(2), y: worldPos.y.toFixed(2) },
+        bounds,
+        viewport,
+        sliceMeta,
+        hasCTM: Boolean(ctm),
       });
     }
   };
@@ -161,13 +253,25 @@ export function WorkspaceStage({ visibleItemIds }: { visibleItemIds?: string[] }
     const dxPx = e.clientX - last.x;
     const dyPx = e.clientY - last.y;
     panPointerRef.current = { x: e.clientX, y: e.clientY };
-    const mmpp = getMmPerPx();
-    const dxMm = dxPx * mmpp.x * Math.max(MIN_SPEED_MULT, panSpeedMultiplier);
-    const dyMm = dyPx * mmpp.y * Math.max(MIN_SPEED_MULT, panSpeedMultiplier);
+    const v = deltaPxToMm(dxPx, dyPx);
+    const speed = Math.max(MIN_SPEED_MULT, panSpeedMultiplier);
+    const dxMm = v.x * speed;
+    // Invert Y delta to match expected direction in Y-flipped coordinate system
+    const dyMm = -v.y * speed;
     panDeltaRef.current = { x: panDeltaRef.current.x + dxMm, y: panDeltaRef.current.y + dyMm };
     const start = panStartRef.current ?? { x: 0, y: 0 };
     const next = { x: start.x + panDeltaRef.current.x, y: start.y + panDeltaRef.current.y };
     panPendingRef.current = next;
+    
+    // Debug logging for pan movements
+    // eslint-disable-next-line no-console
+    console.log('[pan:move]', {
+      pixelDelta: { x: dxPx.toFixed(1), y: dyPx.toFixed(1) },
+      mmDelta: { x: dxMm.toFixed(2), y: dyMm.toFixed(2) },
+      startPan: { x: start.x.toFixed(2), y: start.y.toFixed(2) },
+      currentPan: { x: next.x.toFixed(2), y: next.y.toFixed(2) },
+      cumulativeDelta: { x: panDeltaRef.current.x.toFixed(2), y: panDeltaRef.current.y.toFixed(2) },
+    });
     if (panRafRef.current == null) {
       panRafRef.current = requestAnimationFrame(() => {
         panRafRef.current = null;
@@ -176,7 +280,12 @@ export function WorkspaceStage({ visibleItemIds }: { visibleItemIds?: string[] }
         // Imperatively update transform for smoothness
         const g = contentGroupRef.current;
         if (g) {
-          g.setAttribute('transform', `translate(${pending.x} ${pending.y}) scale(${viewport.zoom})`);
+          // For Y-up coordinate system with Y-flip, we need to negate the Y translation
+          // Order: Y-up flip, then pan with Y-negated, then zoom
+          g.setAttribute(
+            'transform',
+            `scale(1 -1) translate(${pending.x} ${-pending.y}) scale(${viewport.zoom})`
+          );
         }
       });
     }
@@ -212,42 +321,11 @@ export function WorkspaceStage({ visibleItemIds }: { visibleItemIds?: string[] }
     const m = g.getScreenCTM();
     if (!m) return { x: 0, y: 0 };
     // a and d represent scaleX and scaleY
-    return { x: 1 / m.a, y: 1 / m.d };
+    // Use absolute to avoid sign inversion when stage is flipped in Y
+    return { x: 1 / Math.abs(m.a), y: 1 / Math.abs(m.d) };
   };
 
-  const gridLines = useMemo(() => {
-    if (!grid.show || grid.size <= 0) return null;
-    const lines: React.ReactElement[] = [];
-    // vertical lines
-    for (let x = 0; x <= bounds.width; x += grid.size) {
-      lines.push(
-        <line
-          key={`v-${x}`}
-          x1={x}
-          y1={0}
-          x2={x}
-          y2={bounds.height}
-          stroke={GRID_LINE_STROKE.color}
-          strokeWidth={GRID_LINE_STROKE.width}
-        />
-      );
-    }
-    // horizontal lines
-    for (let y = 0; y <= bounds.height; y += grid.size) {
-      lines.push(
-        <line
-          key={`h-${y}`}
-          x1={0}
-          y1={y}
-          x2={bounds.width}
-          y2={y}
-          stroke={GRID_LINE_STROKE.color}
-          strokeWidth={GRID_LINE_STROKE.width}
-        />
-      );
-    }
-    return lines;
-  }, [grid.show, grid.size, bounds.width, bounds.height]);
+  // Grid moved to dedicated component
 
   // DnD handlers
   const onDragStart = (e: DragStartEvent) => {
@@ -267,11 +345,23 @@ export function WorkspaceStage({ visibleItemIds }: { visibleItemIds?: string[] }
     if (!item) return;
     const dxPx = e.delta.x;
     const dyPx = e.delta.y;
-    const mmpp = getMmPerPx();
-    const dxMm = dxPx * mmpp.x;
-    const dyMm = dyPx * mmpp.y;
+    const v = deltaPxToMm(dxPx, dyPx); // v is in centered Y-up local mm
+    const dxMm = v.x;
+    const dyMm = -v.y; // positions are stored in top-left Y-down; invert Y
     let nx = x0 + dxMm;
     let ny = y0 + dyMm;
+
+    // eslint-disable-next-line no-console
+    console.log('[onDragMove:debug]', {
+      dxPx: e.delta.x,
+      dyPx: e.delta.y,
+      dxMm,
+      dyMm,
+      x0,
+      y0,
+      nx_pre_clamp: nx,
+      ny_pre_clamp: ny,
+    });
     // Clamp within bounds (ensuring item stays fully inside)
     let itemWidth = 100;
     let itemHeight = 100;
@@ -281,18 +371,24 @@ export function WorkspaceStage({ visibleItemIds }: { visibleItemIds?: string[] }
     } else if (item.type === 'sliceLayer') {
       const extRaw = makerjs.measure.modelExtents(item.layer.makerJsModel);
       if (extRaw) {
-        const planeAware = Boolean(item.layer.plane);
-        const metaExt = item.layer.uvExtents;
-        const minU = planeAware ? (metaExt?.minU ?? extRaw.low[0]) : extRaw.low[0];
-        const minV = planeAware ? (metaExt?.minV ?? extRaw.low[1]) : extRaw.low[1];
-        const maxU = planeAware ? (metaExt?.maxU ?? extRaw.high[0]) : extRaw.high[0];
-        const maxV = planeAware ? (metaExt?.maxV ?? extRaw.high[1]) : extRaw.high[1];
+        const useMeta = !ui.disablePlaneMapping;
+        const metaExt = useMeta ? item.layer.uvExtents : undefined;
+        const minU = metaExt?.minU ?? extRaw.low[0];
+        const minV = metaExt?.minV ?? extRaw.low[1];
+        const maxU = metaExt?.maxU ?? extRaw.high[0];
+        const maxV = metaExt?.maxV ?? extRaw.high[1];
         itemWidth = Math.max(0, maxU - minU);
         itemHeight = Math.max(0, maxV - minV);
       }
     }
-    nx = Math.max(MIN_POSITION_MM, Math.min(bounds.width - itemWidth, nx));
-    ny = Math.max(MIN_POSITION_MM, Math.min(bounds.height - itemHeight, ny));
+    if (item.type === 'sliceLayer') {
+      // Re-enable proper clamping for sliceLayer using top-left stored positions
+      nx = Math.max(MIN_POSITION_MM, Math.min(bounds.width - itemWidth, nx));
+      ny = Math.max(MIN_POSITION_MM, Math.min(bounds.height - itemHeight, ny));
+    } else {
+      nx = Math.max(MIN_POSITION_MM, Math.min(bounds.width - itemWidth, nx));
+      ny = Math.max(MIN_POSITION_MM, Math.min(bounds.height - itemHeight, ny));
+    }
     if (grid.snap && grid.size > 0) {
       nx = Math.round(nx / grid.size) * grid.size;
       ny = Math.round(ny / grid.size) * grid.size;
@@ -312,18 +408,34 @@ export function WorkspaceStage({ visibleItemIds }: { visibleItemIds?: string[] }
         if (!pending || !activeId) return;
         const el = pathRefs.current.get(activeId);
         if (el) {
+          // Map from stored top-left Y-down to centered Y-up for transform
+          const cx = bounds.width / 2;
+          const cy = bounds.height / 2;
           if (item.type === 'sliceLayer') {
             const extRaw = makerjs.measure.modelExtents(item.layer.makerJsModel);
-            const planeAware = Boolean(item.layer.plane);
-            const metaExt = item.layer.uvExtents;
+            const useMeta = !ui.disablePlaneMapping;
+            const metaExt = useMeta ? item.layer.uvExtents : undefined;
             const minV = extRaw ? (metaExt?.minV ?? extRaw.low[1]) : 0;
             const maxV = extRaw ? (metaExt?.maxV ?? extRaw.high[1]) : 0;
             const ih = Math.max(0, maxV - minV);
-            const t = transformForMakerPath(pending.x, pending.y, ih);
+            const xLeftCenter = pending.x - cx;
+            // Use the same formula for both plane mapping enabled and disabled
+            // This ensures consistent positioning during drag operations
+            const yBottomCenter = (bounds.height - (pending.y + ih)) - cy;
+            const t = transformForMakerPath(xLeftCenter, yBottomCenter, ih);
+            try {
+              // eslint-disable-next-line no-console
+              console.log('[sliceLayer:raf]', { id: item.id, disablePlaneMapping: ui.disablePlaneMapping, minV, maxV, ih, pending, cx, cy, xLeftCenter, yBottomCenter, t });
+            } catch {}
             el.setAttribute('transform', t);
-          } else {
+          } else if (item.type === 'rectangle') {
             const ih = item.rect.height;
-            el.setAttribute('transform', transformForMakerPath(pending.x, pending.y, ih));
+            const xLeftCenter = pending.x - cx;
+            const yBottomCenter = (bounds.height - (pending.y + ih)) - cy;
+            el.setAttribute('transform', transformForMakerPath(xLeftCenter, yBottomCenter, ih));
+          } else if (item.type === 'metaModel') {
+            // MetaModel items don't have a rect property, handle differently if needed
+            // For now, we don't expect to drag metaModels, but this prevents the TypeScript error
           }
         }
       });
@@ -391,8 +503,14 @@ export function WorkspaceStage({ visibleItemIds }: { visibleItemIds?: string[] }
         itemHeight = Math.max(0, maxV - minV);
       }
     }
-    nx = Math.max(0, Math.min(bounds.width - itemWidth, nx));
-    ny = Math.max(0, Math.min(bounds.height - itemHeight, ny));
+    if (item.type === 'sliceLayer') {
+      // Clamp both axes for sliceLayer using top-left semantics
+      nx = Math.max(0, Math.min(bounds.width - itemWidth, nx));
+      ny = Math.max(0, Math.min(bounds.height - itemHeight, ny));
+    } else {
+      nx = Math.max(0, Math.min(bounds.width - itemWidth, nx));
+      ny = Math.max(0, Math.min(bounds.height - itemHeight, ny));
+    }
     updateItemPosition(id, nx, ny);
   };
 
@@ -456,12 +574,15 @@ export function WorkspaceStage({ visibleItemIds }: { visibleItemIds?: string[] }
       return;
     }
     let bounds = initializeBounds();
+
+
+
     for (const renderItem of renderItems) {
       if (renderItem.type === 'rectangle') {
         const itemBounds = calculateRectangleBounds(renderItem);
         bounds = updateBounds(bounds, itemBounds);
       } else if (renderItem.type === 'sliceLayer') {
-        const itemBounds = calculateSliceLayerBounds(renderItem);
+        const itemBounds = calculateSliceLayerBounds(renderItem, { disablePlaneMapping: ui.disablePlaneMapping });
         bounds = updateBounds(bounds, itemBounds);
       }
     }
@@ -480,182 +601,286 @@ export function WorkspaceStage({ visibleItemIds }: { visibleItemIds?: string[] }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fitToBoundsRequestId]);
 
+  // Effect to set the initial view to fit the workspace bounds on mount
+  // Effect to set the initial view to fit the workspace bounds on mount
+  const initialFitDoneRef = useRef(false);
+  useEffect(() => {
+    if (initialFitDoneRef.current || bounds.width === 0 || bounds.height === 0) return;
+
+    const workspaceItem = items.find((it) => it.type === 'metaModel' && it.metaType === 'workspace');
+    if (workspaceItem && workspaceItem.type === 'metaModel') {
+      const workspaceBounds = calculateMetaModelBounds(workspaceItem);
+
+      if (workspaceBounds.width > 0 && workspaceBounds.height > 0) {
+        const targetZoom = calculateFitZoom(workspaceBounds, bounds.width, bounds.height, MIN_ZOOM, MAX_ZOOM);
+        const { x: panX, y: panY } = calculateCenterPan(workspaceBounds, bounds.width, bounds.height, targetZoom);
+        setZoom(targetZoom);
+        setPan({ x: panX, y: panY });
+        initialFitDoneRef.current = true; // Prevent re-running
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bounds]); // Re-run if bounds change
+
   return (
     <Box
-      style={{ width: '100%', height: '100%', outline: 'none', position: 'relative' }}
+      style={{ 
+        display: 'flex', 
+        flexDirection: 'column', 
+        height: '100%', 
+        outline: 'none' 
+      }}
       tabIndex={0}
       onKeyDown={handleKeyDown}
     >
-      <DndContext sensors={sensors} onDragStart={onDragStart} onDragMove={onDragMove} onDragEnd={onDragEnd}>
-        <WorkspaceSvg
-          ref={svgRef as any}
-          bounds={bounds}
-          isPanning={isPanning}
-          onClearSelection={() => selectOnly(null)}
-          // onWheel removed - handled by non-passive listener in useEffect
-          onPointerDown={onPointerDown}
-          onPointerMove={onPointerMove}
-          onPointerUp={onPointerUp}
-          onClick={handleDebugClick}
-        >
-          
-          {/* Pan/Zoom group in mm */}
-          <g ref={contentGroupRef} transform={`translate(${viewport.pan.x} ${viewport.pan.y}) scale(${viewport.zoom})`}>
-            {/* Grid */}
-            {gridLines}
-
-            {/* Workspace border in content space */}
-            <WorkspaceBorder width={bounds.width} height={bounds.height} />
-
-            {/* Items */}
-            {renderItems.map((it) => {
-              const sel = selectedIds.includes(it.id);
-              if (it.type === 'rectangle') {
-                const { draggablePathProps, selectionWrapperProps } = calculateRectangleRenderProps(
-                  it,
-                  activeId,
-                  dragPosMm,
-                  selectionOverlayOffsetPx,
-                  getMmPerPx,
-                  rectPathData,
-                  transformForMakerPath
-                );
-                
-                return (
-                  <g key={it.id}>
-                    <DraggablePath
-                      {...draggablePathProps}
-                      selected={sel}
-                      setPathRef={setPathRef}
-                      onClick={() => selectOnly(it.id)}
-                    />
-                    {sel && (
-                      <SelectionWrapper {...selectionWrapperProps} />
-                    )}
-                  </g>
-                );
-              } else if (it.type === 'sliceLayer') {
-                const renderProps = calculateSliceLayerRenderProps(
-                  it,
-                  activeId,
-                  dragPosMm,
-                  selectionOverlayOffsetPx,
-                  getMmPerPx,
-                  transformForMakerPath
-                );
-                
-                if (!renderProps) return null;
-                
-                const { draggablePathProps, selectionWrapperProps, posX, posY, width, height } = renderProps;
-                
-                return (
-                  <g key={it.id}>
-                    <DraggablePath
-                      {...draggablePathProps}
-                      selected={sel}
-                      setPathRef={setPathRef}
-                      onClick={() => selectOnly(it.id)}
-                    />
-                    {sel && (
-                      <>
-                        <SelectionWrapper {...selectionWrapperProps} />
-                        {/* Debug: show where we think the geometry should be */}
-                        <rect 
-                          x={posX} 
-                          y={posY - (height + (height/2))} 
-                          width={width} 
-                          height={height} 
-                          fill="none" 
-                          stroke="lime" 
-                          strokeWidth="2" 
-                          strokeDasharray="5,5"
-                          opacity="0.7"
-                        />
-                        <text x={posX + 5} y={posY - 5} fontSize="12" fill="lime">{posX.toFixed(1)}, {posY.toFixed(1)}</text>
-                      </>
-                    )}
-                  </g>
-                );
-              }
-              return null;
-            })}
+      {/* Main workspace area */}
+      <Box style={{ flex: 1, position: 'relative' }}>
+        <DndContext sensors={sensors} onDragStart={onDragStart} onDragMove={onDragMove} onDragEnd={onDragEnd}>
+          <WorkspaceSvg
+            ref={svgRef as any}
+            bounds={bounds}
+            isPanning={isPanning}
+            onClearSelection={() => selectOnly(null)}
+            // onWheel removed - handled by non-passive listener in useEffect
+            onPointerDown={onPointerDown}
+            onPointerMove={onPointerMove}
+            onPointerUp={onPointerUp}
+            onClickCapture={handleDebugClick}
+          >
             
-            {/* Debug click markers */}
-            {debugClicks.map((click, i) => (
-              <g key={i} pointerEvents="none">
-                {/* World space marker */}
-                <circle 
-                  cx={click.world.x} 
-                  cy={click.world.y} 
-                  r="3" 
-                  fill="purple" 
-                  opacity="0.8" 
-                />
-                <text 
-                  x={click.world.x + 5} 
-                  y={click.world.y - 5} 
-                  fontSize="12" 
-                  fill="purple"
-                  fontWeight="bold"
-                  style={{ userSelect: 'text' }}
-                >
-                  {click.label} (World: {click.world.x.toFixed(1)}, {click.world.y.toFixed(1)})
-                </text>
-              </g>
-            ))}
-          </g>
-        </WorkspaceSvg>
-      </DndContext>
-      {/* Screen space debug info overlay */}
-      {debugClicks.length > 0 && (
+            {/* Pan/Zoom group in mm, Y-up with origin flip around center */}
+            <g
+              ref={contentGroupRef}
+              transform={`translate(${viewport.pan.x} ${viewport.pan.y}) scale(${viewport.zoom}, ${-viewport.zoom})`}
+            >
+              {/* Meta models (e.g., grid) rendered behind content */}
+            {items
+              .filter((it) => it.type === 'metaModel' && (it.metaType === 'grid' || it.metaType === 'workspace'))
+              .map((meta) => {
+                if (meta.type !== 'metaModel') return null;
+                const model = meta.makerJsModel as unknown as makerjs.IModel;
+                if (meta.metaType === 'grid') {
+                  const gridPathAny = makerjs.exporter.toSVGPathData(model as any, { origin: [0, 0] } as any);
+                  const gridPath = typeof gridPathAny === 'string' ? gridPathAny : Object.values(gridPathAny ?? {}).join(' ');
+                  const axesModel = (model.models && (model.models as any).axes) as makerjs.IModel | undefined;
+                  let xAxisPath = '';
+                  let yAxisPath = '';
+                  if (axesModel && axesModel.paths) {
+                    const axisX = (axesModel.paths as any)['axis-x'];
+                    const axisY = (axesModel.paths as any)['axis-y'];
+                    if (axisX) {
+                      const mX: makerjs.IModel = { paths: { 'axis-x': axisX } } as any;
+                      const xAny = makerjs.exporter.toSVGPathData(mX as any, { origin: [0, 0] } as any);
+                      xAxisPath = typeof xAny === 'string' ? xAny : Object.values(xAny ?? {}).join(' ');
+                    }
+                    if (axisY) {
+                      const mY: makerjs.IModel = { paths: { 'axis-y': axisY } } as any;
+                      const yAny = makerjs.exporter.toSVGPathData(mY as any, { origin: [0, 0] } as any);
+                      yAxisPath = typeof yAny === 'string' ? yAny : Object.values(yAny ?? {}).join(' ');
+                    }
+                  }
+                  return (
+                    <g key={meta.id} aria-roledescription="meta-grid">
+                      {gridPath && (
+                        <g shapeRendering="crispEdges">
+                          <path
+                            d={gridPath}
+                            fill="none"
+                            stroke="#e9ecef"
+                            strokeWidth={0.5}
+                            strokeLinecap="square"
+                          />
+                        </g>
+                      )}
+                      {xAxisPath && (
+                        <path
+                          d={xAxisPath}
+                          fill="none"
+                          stroke="#fa5252" /* red for X axis */
+                          strokeWidth={0.8}
+                          strokeLinecap="square"
+                          vectorEffect="non-scaling-stroke"
+                        />
+                      )}
+                      {yAxisPath && (
+                        <path
+                          d={yAxisPath}
+                          fill="none"
+                          stroke="#2f9e44" /* green for Y axis */
+                          strokeWidth={0.8}
+                          strokeLinecap="square"
+                          vectorEffect="non-scaling-stroke"
+                        />
+                      )}
+                    </g>
+                  );
+                }
+                if (meta.metaType === 'workspace') {
+                  // TODO(workspace-chrome): Render additional workspace chrome here:
+                  // - background fill panel
+                  // - rulers (tick marks + labels)
+                  // - origin marker at (0,0)
+                  // - printable/safe-area overlays
+                  const borderModel = (model.models && (model.models as any).border) as makerjs.IModel | undefined;
+                  if (!borderModel) return null;
+                  const bAny = makerjs.exporter.toSVGPathData(borderModel as any, { origin: [0, 0] } as any);
+                  const borderPath = typeof bAny === 'string' ? bAny : Object.values(bAny ?? {}).join(' ');
+                  return (
+                    <g key={meta.id} aria-roledescription="meta-workspace">
+                      {borderPath && (
+                        <path
+                          d={borderPath}
+                          fill="none"
+                          stroke={BORDER_STROKE.color}
+                          strokeWidth={BORDER_STROKE.width}
+                          vectorEffect="non-scaling-stroke"
+                          strokeLinecap="square"
+                        />
+                      )}
+                    </g>
+                  );
+                }
+                return null;
+              })}
+
+              {/* Border now rendered from meta model above */}
+
+              {/* Debug: world Y=0 midline */}
+              <line
+                x1={-bounds.width / 2}
+                y1={0}
+                x2={bounds.width / 2}
+                y2={0}
+                stroke="#00bcd4"
+                strokeWidth={0.4}
+                strokeDasharray="2,2"
+                vectorEffect="non-scaling-stroke"
+              />
+
+              {/* Items */}
+              {renderItems.map((renderItem) => {
+                const isSelected = selectedIds.includes(renderItem.id);
+                if (renderItem.type === 'rectangle') {
+                  const { draggablePathProps, selectionWrapperProps } = calculateRectangleRenderProps(
+                    renderItem,
+                    activeId,
+                    dragPosMm,
+                    selectionOverlayOffsetPx,
+                    getMmPerPx,
+                    rectPathData,
+                    transformForMakerPath,
+                    bounds
+                  );
+                  
+                  return (
+                    <g key={renderItem.id}>
+                      <DraggablePath
+                        {...draggablePathProps}
+                        selected={isSelected}
+                        setPathRef={setPathRef}
+                        onClick={() => selectOnly(renderItem.id)}
+                      />
+                      {isSelected && (
+                        <SelectionWrapper {...selectionWrapperProps} />
+                      )}
+                    </g>
+                  );
+                } else if (renderItem.type === 'sliceLayer') {
+                  const renderProps = calculateSliceLayerRenderProps(
+                    renderItem,
+                    activeId,
+                    dragPosMm,
+                    selectionOverlayOffsetPx,
+                    getMmPerPx,
+                    transformForMakerPath,
+                    bounds,
+                    { disablePlaneMapping: ui.disablePlaneMapping }
+                  );
+
+                  if (!renderProps) return null;
+
+                  const { draggablePathProps, selectionWrapperProps, posX, posY, width, height } = renderProps as any;
+                  if (isSelected) {
+                    try {
+                      // eslint-disable-next-line no-console
+                      console.log('[sliceLayer:renderProps]', { id: renderItem.id, disablePlaneMapping: ui.disablePlaneMapping, posX, posY, width, height });
+                    } catch {}
+                  }
+
+                  return (
+                    <g key={renderItem.id}>
+                      <DraggablePath
+                        {...draggablePathProps}
+                        selected={isSelected}
+                        setPathRef={setPathRef}
+                        onClick={() => selectOnly(renderItem.id)}
+                      />
+                      {/* Debug: alternate bottom-left normalized path for comparison */}
+                      {isSelected && (() => {
+                        const alt = calculateSliceLayerDebugAltProps(renderItem as any, {
+                          bounds,
+                          posX,
+                          posY,
+                          selectionOverlayOffsetPx,
+                          getMmPerPx,
+                          transformForMakerPath,
+                          disablePlaneMapping: ui.disablePlaneMapping,
+                        });
+                        return alt ? (
+                          <path
+                            d={alt.d}
+                            transform={alt.transform}
+                            fill="none"
+                            stroke="#1971c2"
+                            strokeDasharray="3,2"
+                            strokeWidth={0.6}
+                            vectorEffect="non-scaling-stroke"
+                          />
+                        ) : null;
+                      })()}
+                      {/* {isSelected && <SelectionWrapper {...selectionWrapperProps} />} */}
+                    </g>
+                  );
+                }
+                return null;
+              })}
+              
+              {/* Debug click markers */}
+              {debugClicks.map((click, i) => (
+                <DebugMarker key={i} world={click.world} label={click.label} />
+              ))}
+            </g>
+          </WorkspaceSvg>
+        </DndContext>
+        {/* Close workspace area container */}
+        </Box>
+
+      
+      {/* Performance HUD accordion - positioned beneath workspace */}
+      <Collapse in={showPerfHud}>
         <Box
           style={{
-            position: 'absolute',
-            top: 20,
-            left: 10,
-            width: 400,
-            backgroundColor: 'white',
-            opacity: 0.9,
-            border: '1px solid purple',
-            pointerEvents: 'none',
-            padding: 5,
-            zIndex: 1000
+            backgroundColor: 'rgba(0, 0, 0, 0.8)',
+            color: 'white',
+            padding: '12px',
+            borderRadius: '4px',
+            fontSize: '12px',
+            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+            marginTop: 8
           }}
         >
-          <div style={{ 
-            fontSize: 12, 
-            color: 'purple', 
-            fontWeight: 'bold',
-            userSelect: 'text',
-            marginBottom: 5
-          }}>
-            Debug Clicks (Shift+Click to add, Shift+C to clear):
-          </div>
-          {debugClicks.map((click, i) => (
-            <div 
-              key={i} 
-              style={{ 
-                fontSize: 11, 
-                color: 'black', 
-                userSelect: 'text',
-                marginBottom: 3
-              }}
-            >
-              {click.label}: Screen({click.screen.x.toFixed(0)}, {click.screen.y.toFixed(0)}) → World({click.world.x.toFixed(1)}, {click.world.y.toFixed(1)})
-            </div>
-          ))}
+          <WorkspacePerfHud
+            fps={fps}
+            itemsCount={items.length}
+            selectedCount={selectedIds.length}
+            zoom={viewport.zoom}
+            pan={viewport.pan}
+            selectedItemJson={selectedItemJson}
+            selectedSliceLayer={selectedSliceLayer}
+            debugClicks={debugClicks}
+          />
         </Box>
-      )}
-      {showPerfHud && (
-        <WorkspacePerfHud
-          fps={fps}
-          itemsCount={items.length}
-          selectedCount={selectedIds.length}
-          zoom={viewport.zoom}
-          pan={viewport.pan}
-          selectedItemJson={selectedItemJson}
-        />
-      )}
+      </Collapse>
     </Box>
   );
 }

@@ -1,0 +1,1 @@
+Focus on user-visible outcomes and store interactions, not internal math details.

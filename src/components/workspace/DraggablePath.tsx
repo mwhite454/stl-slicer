@@ -1,6 +1,8 @@
 "use client";
 import { useDraggable } from '@dnd-kit/core';
 import React, { memo } from 'react';
+import { Path } from './Path';
+import { SelectedPath } from './SelectedPath';
 
 type DraggablePathProps = {
     id: string;
@@ -10,8 +12,9 @@ type DraggablePathProps = {
     onClick: () => void;
     setPathRef: (id: string, el: SVGGraphicsElement | null) => void;
     selectionD?: string;
+    stroke?: string;
 };
-export const DraggablePath = memo(function DraggablePath({ id, d, transform, selected, onClick, setPathRef, selectionD }: DraggablePathProps) {
+export const DraggablePath = memo(function DraggablePath({ id, d, transform, selected, onClick, setPathRef, selectionD, stroke }: DraggablePathProps) {
     const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id });
     const handleGroupRef = (node: SVGGElement | null) => {
         setNodeRef(node as unknown as HTMLElement | null);
@@ -41,35 +44,8 @@ export const DraggablePath = memo(function DraggablePath({ id, d, transform, sel
                 onClick();
             }}
         >
-            {/* Base geometry */}
-            <text>{transform}</text>
-            <path
-                focusable={false as any}
-                d={d}
-                fill="transparent"
-                stroke="#222"
-                strokeWidth={0.8}
-                vectorEffect="non-scaling-stroke"
-                opacity={isDragging ? 0.9 : 1}
-                pointerEvents="all"
-                style={{ outline: 'none' }}
-                onFocus={(e) => {
-                    (e.currentTarget as any)?.blur?.();
-                }} />
-            {/* Selection highlight locked to same geometry & transform */}
-            {selected && (
-                <path
-                    d={ selectionD || d }
-                    fill="none"
-                    stroke="#1e90ff"
-                    strokeWidth={1.4}
-                    strokeLinejoin="round"
-                    strokeLinecap="round"
-                    vectorEffect="non-scaling-stroke"
-                    pointerEvents="none"
-                    strokeDasharray="3 2"
-                />
-            )}
+            <Path d={d} isDragging={isDragging} stroke={stroke} />
+            {selected && <SelectedPath d={d} selectionD={selectionD} />}
         </g>
     );
 });

@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import makerjs from 'makerjs';
 import { nanoid } from 'nanoid';
 import type {
   WorkspaceState,
@@ -8,7 +9,8 @@ import type {
   ViewportState,
   Units,
   UiSettings,
-  SliceLayerParams
+  SliceLayerParams,
+  LaserOperation
 } from '@/types/workspace';
 import type { MakerJSModel } from '@/lib/coords';
 
@@ -17,6 +19,7 @@ export type WorkspaceActions = {
   addRectangle: (params: { width: number; height: number; x?: number; y?: number }) => void;
   addManyRectangles: (params: { count: number; width: number; height: number; margin?: number }) => void;
   updateItemPosition: (id: string, x: number, y: number) => void;
+  assignOperation: (id: string, operationId: string | null) => void;
   deleteItem: (id: string) => void;
   clearItems: () => void;
 
@@ -66,6 +69,16 @@ export type WorkspaceActions = {
   setGrid: (grid: Partial<GridSettings>) => void;
   setBounds: (bounds: Bounds) => void;
   setBedSize: (bounds: Bounds) => void; // convenience to update both ui.bedSizeMm and bounds
+
+  // operations
+  addOperation: (op: Omit<LaserOperation, 'id' | 'isMeta'> & { id?: string; isMeta?: boolean }) => void;
+  updateOperation: (id: string, updates: Partial<Omit<LaserOperation, 'id' | 'isMeta'>>) => void;
+  removeOperation: (id: string) => void; // cannot remove meta
+  
+  // meta models
+  upsertMetaGrid: (model: MakerJSModel) => void;
+  upsertMetaWorkspace: (model: MakerJSModel) => void;
+  removeMetaByType: (metaType: 'grid' | 'workspace') => void;
 };
 
 export type WorkspaceStore = WorkspaceState & WorkspaceActions;
@@ -86,23 +99,38 @@ const DEFAULT_UI: UiSettings = {
   bedSizeMm: DEFAULT_BOUNDS,
   showPerfHud: false,
   fitToBoundsRequestId: 0,
+  disablePlaneMapping: true,
 };
+
+// TODO(workspace-chrome): Consider adding UI settings to toggle/show workspace chrome features
+// such as rulers, background fill, origin marker visibility, and printable/safe-area overlays.
+// These flags can be read in WorkspaceStage to parameterize generateMakerWorkspaceModel.
+
+// Seed an initial Mantine-like operation palette
+const DEFAULT_OPERATIONS: LaserOperation[] = [
+  { id: 'op-meta', key: 'meta', label: 'Meta', color: '#868e96', isMeta: true }, // gray[6]
+  { id: 'op-cut', key: 'cut', label: 'Cut', color: '#fa5252' }, // red[6]
+  { id: 'op-engrave', key: 'engrave', label: 'Engrave', color: '#228be6' }, // blue[6]
+  { id: 'op-score', key: 'score', label: 'Score', color: '#7048e8' }, // violet/grape[6]
+];
 
 export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
   bounds: DEFAULT_UI.bedSizeMm,
   grid: DEFAULT_GRID,
   viewport: DEFAULT_VIEWPORT,
   ui: DEFAULT_UI,
+  operations: DEFAULT_OPERATIONS,
   items: [],
   selection: { selectedIds: [] },
 
-  addRectangle: ({ width, height, x = 0, y = 0 }) =>
+  addRectangle: ({ width, height, x = 20, y = 10 }) =>
     set((state) => {
       const item: WorkspaceItem = {
         id: nanoid(),
         type: 'rectangle',
         position: { x, y, z: 0 },
         zIndex: state.items.length,
+        operationId: null,
         rect: { width, height },
       };
       return { items: [...state.items, item] };
@@ -149,6 +177,11 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
       items: state.items.map((it) => (it.id === id ? { ...it, position: { x, y } } : it)),
     })),
 
+  assignOperation: (id, operationId) =>
+    set((state) => ({
+      items: state.items.map((it) => (it.id === id ? { ...it, operationId } : it)),
+    })),
+
   deleteItem: (id) => set((state) => ({ items: state.items.filter((it) => it.id !== id) })),
   clearItems: () => set({ items: [], selection: { selectedIds: [] } }),
 
@@ -175,16 +208,35 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     axisMap,
     vUpSign,
     uvExtents,
-    x = 0, 
-    y = 0,
+    x, 
+    y,
     z = zCoordinate
   }) =>
     set((state) => {
+      // Determine extents consistently with rendering path
+      const useMeta = !state.ui.disablePlaneMapping;
+      let w = 0;
+      let h = 0;
+      if (useMeta && uvExtents) {
+        w = Math.max(0, uvExtents.maxU - uvExtents.minU);
+        h = Math.max(0, uvExtents.maxV - uvExtents.minV);
+      } else {
+        const ext = makerjs.measure.modelExtents(makerJsModel as any);
+        if (ext) {
+          w = Math.max(0, ext.high[0] - ext.low[0]);
+          h = Math.max(0, ext.high[1] - ext.low[1]);
+        }
+      }
+      const cx = Math.max(0, (state.bounds.width - w) / 2);
+      const cy = Math.max(0, (state.bounds.height - h) / 2);
+      const px = x ?? cx;
+      const py = y ?? cy;
       const item: WorkspaceItem = {
         id: nanoid(),
         type: 'sliceLayer',
-        position: { x, y, z },
+        position: { x: px, y: py, z },
         zIndex: state.items.length,
+        operationId: null,
         layer: {
           makerJsModel,
           layerIndex,
@@ -204,15 +256,34 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     set((state) => {
       const items: WorkspaceItem[] = [...state.items];
       layers.forEach((layerData, index) => {
+        // Compute extents for centering if no x/y provided
+        const useMeta = !state.ui.disablePlaneMapping;
+        let w = 0;
+        let h = 0;
+        if (useMeta && layerData.uvExtents) {
+          w = Math.max(0, layerData.uvExtents.maxU - layerData.uvExtents.minU);
+          h = Math.max(0, layerData.uvExtents.maxV - layerData.uvExtents.minV);
+        } else {
+          const ext = makerjs.measure.modelExtents(layerData.makerJsModel as any);
+          if (ext) {
+            w = Math.max(0, ext.high[0] - ext.low[0]);
+            h = Math.max(0, ext.high[1] - ext.low[1]);
+          }
+        }
+        const cx = Math.max(0, (state.bounds.width - w) / 2);
+        const cy = Math.max(0, (state.bounds.height - h) / 2);
+        const px = layerData.x ?? cx;
+        const py = layerData.y ?? cy;
         const item: WorkspaceItem = {
           id: nanoid(),
           type: 'sliceLayer',
           position: { 
-            x: layerData.x || 0, 
-            y: layerData.y || 0, 
+            x: px, 
+            y: py, 
             z: layerData.z || layerData.zCoordinate 
           },
           zIndex: items.length + index,
+          operationId: null,
           layer: {
             makerJsModel: layerData.makerJsModel,
             layerIndex: layerData.layerIndex,
@@ -241,5 +312,80 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
         }
         return item;
       })
-    }))
+    })),
+
+  // operations
+  addOperation: (op) =>
+    set((state) => {
+      // prevent duplicate key
+      if (state.operations.some((o) => o.key === op.key)) return {} as any;
+      const id = op.id ?? nanoid();
+      const isMeta = op.isMeta ?? false;
+      const next: LaserOperation = { id, key: op.key, label: op.label, color: op.color, isMeta };
+      return { operations: [...state.operations, next] };
+    }),
+  updateOperation: (id, updates) =>
+    set((state) => ({
+      operations: state.operations.map((o) => (o.id === id || o.key === id ? { ...o, ...updates } : o)),
+    })),
+  removeOperation: (id) =>
+    set((state) => {
+      const op = state.operations.find((o) => o.id === id || o.key === id);
+      if (!op) return {} as any;
+      if (op.isMeta) return {} as any; // disallow removing meta
+      const remaining = state.operations.filter((o) => o !== op);
+      // Clear operationId on items referencing removed op
+      const items = state.items.map((it) => (it.operationId === op.id || it.operationId === op.key ? { ...it, operationId: null } : it));
+      return { operations: remaining, items };
+    }),
+
+  // Meta models
+  upsertMetaGrid: (model) =>
+    set((state) => {
+      const metaId = 'meta-grid';
+      const existingIdx = state.items.findIndex((it) => it.type === 'metaModel' && it.metaType === 'grid');
+      const opMeta = state.operations.find((o) => o.key === 'meta' || o.id === 'op-meta');
+      const metaItem = {
+        id: metaId,
+        type: 'metaModel' as const,
+        position: { x: 0, y: 0, z: 0 },
+        zIndex: -1000, // force behind others
+        locked: true,
+        operationId: opMeta ? (opMeta.id ?? opMeta.key) : null,
+        metaType: 'grid' as const,
+        makerJsModel: model,
+      };
+      if (existingIdx >= 0) {
+        const items = [...state.items];
+        items[existingIdx] = { ...metaItem };
+        return { items };
+      }
+      return { items: [metaItem, ...state.items] };
+    }),
+  // TODO(workspace-chrome): Parameterize the workspace meta model generation with UI settings
+  // (e.g., enable rulers, margins), and re-upsert here when those settings change.
+  upsertMetaWorkspace: (model) =>
+    set((state) => {
+      const metaId = 'meta-workspace';
+      const existingIdx = state.items.findIndex((it) => it.type === 'metaModel' && it.metaType === 'workspace');
+      const opMeta = state.operations.find((o) => o.key === 'meta' || o.id === 'op-meta');
+      const metaItem = {
+        id: metaId,
+        type: 'metaModel' as const,
+        position: { x: 0, y: 0, z: 0 },
+        zIndex: -2000,
+        locked: true,
+        operationId: opMeta ? (opMeta.id ?? opMeta.key) : null,
+        metaType: 'workspace' as const,
+        makerJsModel: model,
+      };
+      if (existingIdx >= 0) {
+        const items = [...state.items];
+        items[existingIdx] = { ...metaItem };
+        return { items };
+      }
+      return { items: [metaItem, ...state.items] };
+    }),
+  removeMetaByType: (metaType) =>
+    set((state) => ({ items: state.items.filter((it) => !(it.type === 'metaModel' && it.metaType === metaType)) })),
 }));
