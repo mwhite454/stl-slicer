@@ -1,0 +1,23 @@
+{
+  "id": "dev/ui-stl-slicer",
+  "title": "Root UI: StlSlicer",
+  "description": "- Path: src/components/StlSlicer.tsx",
+  "source": "@site/../docs/dev/ui-stl-slicer.md",
+  "sourceDirName": "dev",
+  "slug": "/dev/ui-stl-slicer",
+  "permalink": "/dev/ui-stl-slicer",
+  "draft": false,
+  "unlisted": false,
+  "tags": [],
+  "version": "current",
+  "frontMatter": {},
+  "sidebar": "docs",
+  "previous": {
+    "title": "Pure UV → MakerJS Utilities",
+    "permalink": "/dev/slicing-pure"
+  },
+  "next": {
+    "title": "WorkspaceStage (2D Renderer)",
+    "permalink": "/dev/workspace-stage-2d"
+  }
+}

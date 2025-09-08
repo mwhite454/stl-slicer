@@ -1,0 +1,23 @@
+{
+  "id": "dev/workspace-store",
+  "title": "Workspace Store (Zustand)",
+  "description": "- Path: src/store/workspaceStore",
+  "source": "@site/../docs/dev/workspace-store.md",
+  "sourceDirName": "dev",
+  "slug": "/dev/workspace-store",
+  "permalink": "/dev/workspace-store",
+  "draft": false,
+  "unlisted": false,
+  "tags": [],
+  "version": "current",
+  "frontMatter": {},
+  "sidebar": "docs",
+  "previous": {
+    "title": "WorkspaceStage (2D Renderer)",
+    "permalink": "/dev/workspace-stage-2d"
+  },
+  "next": {
+    "title": "Slicing Module Flow",
+    "permalink": "/slicing-flow"
+  }
+}

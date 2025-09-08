@@ -1,0 +1,88 @@
+{
+  "docusaurus-plugin-content-docs": {
+    "default": {
+      "path": "/",
+      "versions": [
+        {
+          "name": "current",
+          "label": "Next",
+          "isLast": true,
+          "path": "/",
+          "mainDocId": "dev/makerjs-exporter",
+          "docs": [
+            {
+              "id": "dev/makerjs-exporter",
+              "path": "/dev/makerjs-exporter",
+              "sidebar": "docs"
+            },
+            {
+              "id": "dev/slicing-adapter",
+              "path": "/dev/slicing-adapter",
+              "sidebar": "docs"
+            },
+            {
+              "id": "dev/slicing-core",
+              "path": "/dev/slicing-core",
+              "sidebar": "docs"
+            },
+            {
+              "id": "dev/slicing-metadata",
+              "path": "/dev/slicing-metadata",
+              "sidebar": "docs"
+            },
+            {
+              "id": "dev/slicing-plane",
+              "path": "/dev/slicing-plane",
+              "sidebar": "docs"
+            },
+            {
+              "id": "dev/slicing-pure",
+              "path": "/dev/slicing-pure",
+              "sidebar": "docs"
+            },
+            {
+              "id": "dev/ui-stl-slicer",
+              "path": "/dev/ui-stl-slicer",
+              "sidebar": "docs"
+            },
+            {
+              "id": "dev/workspace-stage-2d",
+              "path": "/dev/workspace-stage-2d",
+              "sidebar": "docs"
+            },
+            {
+              "id": "dev/workspace-store",
+              "path": "/dev/workspace-store",
+              "sidebar": "docs"
+            },
+            {
+              "id": "slicing-flow",
+              "path": "/slicing-flow",
+              "sidebar": "docs"
+            },
+            {
+              "id": "stl",
+              "path": "/stl",
+              "sidebar": "docs"
+            },
+            {
+              "id": "user-flow-upload-to-2d",
+              "path": "/user-flow-upload-to-2d",
+              "sidebar": "docs"
+            }
+          ],
+          "draftIds": [],
+          "sidebars": {
+            "docs": {
+              "link": {
+                "path": "/dev/makerjs-exporter",
+                "label": "dev/makerjs-exporter"
+              }
+            }
+          }
+        }
+      ],
+      "breadcrumbs": true
+    }
+  }
+}

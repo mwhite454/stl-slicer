@@ -815,7 +815,6 @@ export function WorkspaceStage({ visibleItemIds }: { visibleItemIds?: string[] }
                         setPathRef={setPathRef}
                         onClick={() => selectOnly(renderItem.id)}
                       />
-                      {/* Debug: alternate bottom-left normalized path for comparison */}
                       {isSelected && (() => {
                         const alt = calculateSliceLayerDebugAltProps(renderItem as any, {
                           bounds,
@@ -841,10 +840,65 @@ export function WorkspaceStage({ visibleItemIds }: { visibleItemIds?: string[] }
                       {/* {isSelected && <SelectionWrapper {...selectionWrapperProps} />} */}
                     </g>
                   );
+                } else if (renderItem.type === 'label') {
+                  // Render label as maker.js path
+                  // Validate extents first; skip invalid labels
+                  const ext = makerjs.measure.modelExtents(renderItem.makerJsModel as any);
+                  if (!ext || !Number.isFinite(ext.low[0]) || !Number.isFinite(ext.low[1]) || !Number.isFinite(ext.high[0]) || !Number.isFinite(ext.high[1])) {
+                    try {
+                      // eslint-disable-next-line no-console
+                      console.warn('[label:skip-invalid-extents]', { id: renderItem.id, ext });
+                    } catch {}
+                    return null;
+                  }
+                  const pathDataAny = makerjs.exporter.toSVGPathData(
+                    renderItem.makerJsModel as any,
+                    { origin: [0, 0] } as any
+                  );
+                  const d = typeof pathDataAny === 'string'
+                    ? pathDataAny
+                    : Object.values(pathDataAny ?? {}).join(' ');
+                  if (typeof d !== 'string' || d.length === 0 || d.includes('NaN')) {
+                    try {
+                      // eslint-disable-next-line no-console
+                      console.warn('[label:skip-invalid-path]', { id: renderItem.id, len: typeof d === 'string' ? d.length : 0 });
+                    } catch {}
+                    return null;
+                  }
+                  // Convert stored top-left Y-down (workspace) position to centered Y-up transform
+                  // Measure label extents to obtain height for proper Y-bottom alignment
+                  const minV = ext ? ext.low[1] : 0;
+                  const maxV = ext ? ext.high[1] : 0;
+                  const ih = Math.max(0, maxV - minV);
+                  const cx = bounds.width / 2;
+                  const cy = bounds.height / 2;
+                  const xLeftCenter = renderItem.position.x - cx;
+                  const yBottomCenter = (bounds.height - (renderItem.position.y + ih)) - cy;
+                  const transform = transformForMakerPath(
+                    xLeftCenter,
+                    yBottomCenter,
+                    ih
+                  );
+                  const ops = useWorkspaceStore.getState().operations;
+                  const op = ops.find((o) => o.id === renderItem.operationId || o.key === renderItem.operationId);
+                  const stroke = op?.color ?? '#2bff00';
+                  return (
+                    <g key={renderItem.id}>
+                      <DraggablePath
+                        id={renderItem.id}
+                        d={d}
+                        transform={transform}
+                        selected={isSelected}
+                        setPathRef={setPathRef}
+                        onClick={() => selectOnly(renderItem.id)}
+                        stroke={stroke}
+                      />
+                    </g>
+                  );
                 }
                 return null;
               })}
-              
+
               {/* Debug click markers */}
               {debugClicks.map((click, i) => (
                 <DebugMarker key={i} world={click.world} label={click.label} />

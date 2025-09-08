@@ -10,7 +10,8 @@ import type {
   Units,
   UiSettings,
   SliceLayerParams,
-  LaserOperation
+  LaserOperation,
+  LabelParams
 } from '@/types/workspace';
 import type { MakerJSModel } from '@/lib/coords';
 
@@ -54,6 +55,31 @@ export type WorkspaceActions = {
     z?: number;
   }>) => void;
   
+  // convenience to add layers plus their generated labels from the adapter
+  addMultipleSliceLayersWithLabels: (input: {
+    layers: Array<{
+      makerJsModel: MakerJSModel;
+      layerIndex: number;
+      zCoordinate: number;
+      axis: 'x' | 'y' | 'z';
+      layerThickness: number;
+      plane?: 'XY' | 'XZ' | 'YZ';
+      axisMap?: { u: 'x' | 'y' | 'z'; v: 'x' | 'y' | 'z' };
+      vUpSign?: 1 | -1;
+      uvExtents?: { minU: number; minV: number; maxU: number; maxV: number };
+      x?: number;
+      y?: number;
+      z?: number;
+    }>;
+    labels: Array<{
+      layerIndex: number;
+      text: string;
+      fontSizeMm: number;
+      makerJsModel: MakerJSModel;
+    }>;
+    labelOffsetMm?: { x: number; y: number };
+  }) => void;
+  
   updateSliceLayer: (id: string, updates: Partial<SliceLayerParams>) => void;
 
   // selection
@@ -79,6 +105,19 @@ export type WorkspaceActions = {
   upsertMetaGrid: (model: MakerJSModel) => void;
   upsertMetaWorkspace: (model: MakerJSModel) => void;
   removeMetaByType: (metaType: 'grid' | 'workspace') => void;
+
+  // labels
+  addLabel: (params: {
+    text: string;
+    fontSizeMm: number;
+    makerJsModel: MakerJSModel;
+    x?: number;
+    y?: number;
+    z?: number;
+    operationId?: string | null; // defaults to label op
+    fontFamily?: string;
+    relatedLayerIndex?: number;
+  }) => void;
 };
 
 export type WorkspaceStore = WorkspaceState & WorkspaceActions;
@@ -109,6 +148,7 @@ const DEFAULT_UI: UiSettings = {
 // Seed an initial Mantine-like operation palette
 const DEFAULT_OPERATIONS: LaserOperation[] = [
   { id: 'op-meta', key: 'meta', label: 'Meta', color: '#868e96', isMeta: true }, // gray[6]
+  { id: 'op-label', key: 'label', label: 'Label', color: '#2bff00', isMeta: true }, // lime green
   { id: 'op-cut', key: 'cut', label: 'Cut', color: '#fa5252' }, // red[6]
   { id: 'op-engrave', key: 'engrave', label: 'Engrave', color: '#228be6' }, // blue[6]
   { id: 'op-score', key: 'score', label: 'Score', color: '#7048e8' }, // violet/grape[6]
@@ -169,6 +209,77 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
           }
         }
       }
+      return { items };
+    }),
+  
+  addMultipleSliceLayersWithLabels: ({ layers, labels, labelOffsetMm }) =>
+    set((state) => {
+      const items: WorkspaceItem[] = [...state.items];
+      const labelOp = state.operations.find((o) => o.key === 'label' || o.id === 'op-label');
+      const offsetX = labelOffsetMm?.x ?? 2;
+      const offsetY = labelOffsetMm?.y ?? 2;
+
+      // index labels by layerIndex for quick lookup
+      const labelByIndex = new Map<number, { text: string; fontSizeMm: number; makerJsModel: MakerJSModel }>();
+      labels.forEach((l) => labelByIndex.set(l.layerIndex, { text: l.text, fontSizeMm: l.fontSizeMm, makerJsModel: l.makerJsModel }));
+
+      layers.forEach((layerData, index) => {
+        // Compute extents for centering if no x/y provided (reuse logic from addMultipleSliceLayers)
+        const useMeta = !state.ui.disablePlaneMapping;
+        let w = 0;
+        let h = 0;
+        if (useMeta && layerData.uvExtents) {
+          w = Math.max(0, layerData.uvExtents.maxU - layerData.uvExtents.minU);
+          h = Math.max(0, layerData.uvExtents.maxV - layerData.uvExtents.minV);
+        } else {
+          const ext = makerjs.measure.modelExtents(layerData.makerJsModel as any);
+          if (ext) {
+            w = Math.max(0, ext.high[0] - ext.low[0]);
+            h = Math.max(0, ext.high[1] - ext.low[1]);
+          }
+        }
+        const cx = Math.max(0, (state.bounds.width - w) / 2);
+        const cy = Math.max(0, (state.bounds.height - h) / 2);
+        const px = layerData.x ?? cx;
+        const py = layerData.y ?? cy;
+
+        const layerItem: WorkspaceItem = {
+          id: nanoid(),
+          type: 'sliceLayer',
+          position: { x: px, y: py, z: layerData.z || layerData.zCoordinate },
+          zIndex: items.length + index,
+          operationId: null,
+          layer: {
+            makerJsModel: layerData.makerJsModel,
+            layerIndex: layerData.layerIndex,
+            zCoordinate: layerData.zCoordinate,
+            axis: layerData.axis,
+            layerThickness: layerData.layerThickness,
+            plane: layerData.plane,
+            axisMap: layerData.axisMap,
+            vUpSign: layerData.vUpSign,
+            uvExtents: layerData.uvExtents,
+          },
+        };
+        items.push(layerItem);
+
+        // Add label if present for this layerIndex
+        const label = labelByIndex.get(layerData.layerIndex);
+        if (label) {
+          const labelItem: WorkspaceItem = {
+            id: nanoid(),
+            type: 'label',
+            position: { x: px + offsetX, y: py + offsetY, z: 0 },
+            zIndex: items.length,
+            operationId: labelOp ? (labelOp.id ?? labelOp.key) : 'op-label',
+            relatedLayerIndex: layerData.layerIndex,
+            label: { text: label.text, fontSizeMm: label.fontSizeMm },
+            makerJsModel: label.makerJsModel,
+          } as any;
+          items.push(labelItem);
+        }
+      });
+
       return { items };
     }),
 
@@ -388,4 +499,23 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     }),
   removeMetaByType: (metaType) =>
     set((state) => ({ items: state.items.filter((it) => !(it.type === 'metaModel' && it.metaType === metaType)) })),
+
+  // Labels
+  addLabel: ({ text, fontSizeMm, makerJsModel, x, y, z = 0, operationId, fontFamily, relatedLayerIndex }) =>
+    set((state) => {
+      const opLabel = state.operations.find((o) => o.key === 'label' || o.id === 'op-label');
+      const px = x ?? Math.max(0, (state.bounds.width - 0) / 2);
+      const py = y ?? Math.max(0, (state.bounds.height - 0) / 2);
+      const item: WorkspaceItem = {
+        id: nanoid(),
+        type: 'label',
+        position: { x: px, y: py, z },
+        zIndex: state.items.length,
+        operationId: operationId ?? (opLabel ? (opLabel.id ?? opLabel.key) : 'op-label'),
+        relatedLayerIndex,
+        label: { text, fontSizeMm, fontFamily },
+        makerJsModel: makerJsModel,
+      };
+      return { items: [...state.items, item] };
+    }),
 }));

@@ -1,0 +1,23 @@
+{
+  "id": "dev/workspace-stage-2d",
+  "title": "WorkspaceStage (2D Renderer)",
+  "description": "- Path: src/components/workspace/WorkspaceStage.tsx",
+  "source": "@site/../docs/dev/workspace-stage-2d.md",
+  "sourceDirName": "dev",
+  "slug": "/dev/workspace-stage-2d",
+  "permalink": "/dev/workspace-stage-2d",
+  "draft": false,
+  "unlisted": false,
+  "tags": [],
+  "version": "current",
+  "frontMatter": {},
+  "sidebar": "docs",
+  "previous": {
+    "title": "Root UI: StlSlicer",
+    "permalink": "/dev/ui-stl-slicer"
+  },
+  "next": {
+    "title": "Workspace Store (Zustand)",
+    "permalink": "/dev/workspace-store"
+  }
+}

@@ -1,0 +1,47 @@
+/* Minimal custom styles for the docs site */
+:root {
+  --ifm-color-primary: #228be6; /* Mantine blue */
+  --ifm-code-font-size: 95%;
+}
+
+.hero--primary {
+  --ifm-hero-background-color: #0b2239;
+}
+
+/* Mermaid pan/zoom container */
+.mermaid-panzoom {
+  position: relative;
+  width: 100%;
+  height: 70vh; /* large viewport, adjust as needed */
+  overflow: hidden;
+  border: 1px solid rgba(0,0,0,0.08);
+  border-radius: 8px;
+  background: var(--ifm-background-color);
+}
+
+.mermaid-panzoom svg {
+  cursor: grab;
+  pointer-events: all; /* ensure svg receives input */
+}
+.mermaid-panzoom svg:active {
+  cursor: grabbing;
+}
+
+/* Ensure mermaid blocks don't overflow content width */
+.markdown .mermaid {
+  overflow: visible;
+}
+
+/* Make svg-pan-zoom controls visible and clickable */
+.mermaid-panzoom .svg-pan-zoom_control {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 2;
+}
+.mermaid-panzoom .svg-pan-zoom-control { /* alt class name in some builds */
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 2;
+}

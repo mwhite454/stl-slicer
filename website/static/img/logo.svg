@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title">
+  <title>STL Slicer</title>
+  <defs>
+    <linearGradient id="g" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0%" stop-color="#228be6"/>
+      <stop offset="100%" stop-color="#4dabf7"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="112" height="112" rx="16" fill="url(#g)"/>
+  <g fill="#fff" stroke="#fff" stroke-width="2">
+    <path d="M24 84 L64 28 L104 84 Z" fill="none"/>
+    <path d="M64 28 L64 100" opacity="0.6"/>
+    <circle cx="64" cy="84" r="6" fill="#fff"/>
+  </g>
+  <text x="64" y="118" font-family="monospace" font-size="10" text-anchor="middle" fill="#0b2239">SLICER</text>
+</svg>

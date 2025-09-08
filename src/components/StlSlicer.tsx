@@ -17,7 +17,8 @@ import { ViewModePanel } from './slicer/ViewModePanel';
 import { LayerNavigator } from './slicer/LayerNavigator';
 import { ClearSessionButton } from './slicer/ClearSessionButton';
 import makerjs from 'makerjs';
-import { parseStl, getDimensions as getSlicerDimensions, sliceGeometry } from '@/slicing/core';
+import { parseStl, getDimensions as getSlicerDimensions } from '@/slicing/core';
+import { sliceToMakerModels } from '@/slicing/adapter';
 import type { Axis, SlicerState } from '@/slicing/types';
 
 // Convert File to base64
@@ -157,7 +158,8 @@ function StlSlicerContent() {
       setError(null);
       setHasAutoFit(false);
       try {
-        const { makerJsModels, layers: metaLayers } = sliceGeometry(slicerState, axis, layerThickness);
+        // Use adapter to generate maker models (with labels merged) and enriched layers
+        const { makerJsModels, layers: metaLayers } = await sliceToMakerModels(file, axis, layerThickness);
         if (cancelled) return;
         setMakerModels(makerJsModels);
         // Map to legacy LayerData shape for UI components that only need z/index
@@ -169,12 +171,12 @@ function StlSlicerContent() {
 
         // Push layers to workspace store with full metadata
         const workspaceStore = useWorkspaceStore.getState();
-        // Clear any existing slice layers from workspace
+        // Clear any existing slice layers and labels from workspace before adding new
         const currentItems = workspaceStore.items;
-        const sliceLayerIds = currentItems
-          .filter((item) => item.type === 'sliceLayer')
+        const idsToRemove = currentItems
+          .filter((item) => item.type === 'sliceLayer' || item.type === 'label')
           .map((item) => item.id);
-        sliceLayerIds.forEach((id) => workspaceStore.deleteItem(id));
+        idsToRemove.forEach((id) => workspaceStore.deleteItem(id));
 
         const layersToAdd = metaLayers.map((m, index) => ({
           makerJsModel: makerJsModels[index],
@@ -188,6 +190,7 @@ function StlSlicerContent() {
           uvExtents: m.uvExtents,
           z: m.zCoordinate,
         }));
+        // Add layers only (labels are already part of each makerJsModel)
         workspaceStore.addMultipleSliceLayers(layersToAdd);
 
       } catch (err) {

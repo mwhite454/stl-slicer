@@ -1,0 +1,23 @@
+{
+  "id": "dev/slicing-adapter",
+  "title": "Slicing Adapter",
+  "description": "- Path: src/slicing/adapter.ts",
+  "source": "@site/../docs/dev/slicing-adapter.md",
+  "sourceDirName": "dev",
+  "slug": "/dev/slicing-adapter",
+  "permalink": "/dev/slicing-adapter",
+  "draft": false,
+  "unlisted": false,
+  "tags": [],
+  "version": "current",
+  "frontMatter": {},
+  "sidebar": "docs",
+  "previous": {
+    "title": "MakerJS Exporter",
+    "permalink": "/dev/makerjs-exporter"
+  },
+  "next": {
+    "title": "Slicing Core",
+    "permalink": "/dev/slicing-core"
+  }
+}

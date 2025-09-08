@@ -1,0 +1,19 @@
+{
+  "id": "dev/makerjs-exporter",
+  "title": "MakerJS Exporter",
+  "description": "- External: makerjs",
+  "source": "@site/../docs/dev/makerjs-exporter.md",
+  "sourceDirName": "dev",
+  "slug": "/dev/makerjs-exporter",
+  "permalink": "/dev/makerjs-exporter",
+  "draft": false,
+  "unlisted": false,
+  "tags": [],
+  "version": "current",
+  "frontMatter": {},
+  "sidebar": "docs",
+  "next": {
+    "title": "Slicing Adapter",
+    "permalink": "/dev/slicing-adapter"
+  }
+}

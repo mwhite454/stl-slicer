@@ -63,8 +63,16 @@ export function ViewModePanel({
   // Only render the active preview layer in 2D view
   const visibleItemIds = React.useMemo(() => {
     if (viewMode !== "2d") return [] as string[];
-    const match = items.find((it) => it.type === "sliceLayer" && it.layer.layerIndex === previewLayerIndex);
-    return match ? [match.id] : [];
+    const layerItem = items.find((it) => it.type === "sliceLayer" && it.layer.layerIndex === previewLayerIndex);
+    if (!layerItem) return [];
+    const ids: string[] = [layerItem.id];
+    // include any labels associated with this layer index
+    items.forEach((it) => {
+      if (it.type === 'label' && (it as any).relatedLayerIndex === previewLayerIndex) {
+        ids.push(it.id);
+      }
+    });
+    return ids;
   }, [viewMode, items, previewLayerIndex]);
   return (
     <Box style={{ flex: 1, overflow: "hidden" }}>

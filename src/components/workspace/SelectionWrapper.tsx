@@ -20,7 +20,7 @@ export const SelectionWrapper = React.memo(function SelectionWrapper({
   y,
   width,
   height,
-  stroke = '#1e90ff',
+  stroke = 'red',
   strokeWidth = 0.75,
 }: SelectionWrapperProps) {
   const handles = [

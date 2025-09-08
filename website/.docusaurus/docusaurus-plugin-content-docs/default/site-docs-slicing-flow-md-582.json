@@ -1,0 +1,23 @@
+{
+  "id": "slicing-flow",
+  "title": "Slicing Module Flow",
+  "description": "This document describes the flow of the slicing pipeline across files in src/slicing/ and related utilities.",
+  "source": "@site/../docs/slicing-flow.md",
+  "sourceDirName": ".",
+  "slug": "/slicing-flow",
+  "permalink": "/slicing-flow",
+  "draft": false,
+  "unlisted": false,
+  "tags": [],
+  "version": "current",
+  "frontMatter": {},
+  "sidebar": "docs",
+  "previous": {
+    "title": "Workspace Store (Zustand)",
+    "permalink": "/dev/workspace-store"
+  },
+  "next": {
+    "title": "stl",
+    "permalink": "/stl"
+  }
+}

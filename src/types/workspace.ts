@@ -37,6 +37,13 @@ export type SliceLayerParams = {
   uvExtents?: { minU: number; minV: number; maxU: number; maxV: number };
 };
 
+// Path-based text label parameters
+export type LabelParams = {
+  text: string;
+  fontFamily?: string; // for reference; actual font is loaded via opentype
+  fontSizeMm: number;  // text height in mm
+};
+
 export type WorkspaceItem = 
   | {
       id: string;
@@ -57,6 +64,17 @@ export type WorkspaceItem =
       // Optional laser operation assignment for laser workflow coloring
       operationId?: string | null;
       layer: SliceLayerParams;
+    }
+  | {
+      id: string;
+      type: 'label';
+      position: { x: number; y: number; z?: number }; // mm top-left
+      zIndex: number;
+      locked?: boolean;
+      operationId?: string | null; // should default to 'label' meta op
+      relatedLayerIndex?: number; // associates label with a slice layer index for per-layer views
+      label: LabelParams;
+      makerJsModel: MakerJSModel; // path-based text model
     }
   | {
       id: string;

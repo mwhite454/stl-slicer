@@ -4,6 +4,7 @@ import React from 'react';
 import { Box, Paper, Stack, Text, Switch } from '@mantine/core';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { SliceLayerCard, type SliceLayerItem } from '@/components/SliceLayerCard';
+import JsonView from 'react18-json-view';
 
 export type WorkspacePerfHudProps = {
   fps: number;
@@ -35,7 +36,7 @@ export function WorkspacePerfHud({ fps, itemsCount, selectedCount, zoom, pan, se
   const disablePlaneMapping = useWorkspaceStore((s) => s.ui.disablePlaneMapping);
   const setUi = useWorkspaceStore((s) => s.setUi);
   return (
-    <Box style={{ width: '100%' }}>
+    <Box style={{ width: '100%', maxHeight: '80vh', overflowY: 'auto' }}>
       <Paper shadow="md" radius="md" p="xs" style={{ background: 'rgba(0,0,0,0.6)' }}>
         <Stack gap={2} style={{ lineHeight: 1.2 }}>
           <Text c="white" size="xs">FPS: {fps}</Text>
@@ -56,24 +57,20 @@ export function WorkspacePerfHud({ fps, itemsCount, selectedCount, zoom, pan, se
       {(selectedSliceLayer || selectedItemJson) && (
         <Paper shadow="sm" radius="md" p="xs" mt={8} style={{ background: 'rgba(0,0,0,0.7)' }}>
           <Text c="white" size="xs" fw={600} mb={4}>Selected Item</Text>
-          {selectedSliceLayer ? (
+
+          <Box style={{ maxWidth: 460, maxHeight: 320, overflow: 'scroll' }}>
+            <JsonView
+              src={selectedSliceLayer ?? safeParse(selectedItemJson)}
+              theme="ashes"
+              collapsed={1}
+              enableClipboard={false}
+              displaySize={false}
+              displayArrayIndex
+            />
+          </Box>
+          {selectedSliceLayer && (
             <Box style={{ maxWidth: 460 }}>
               <SliceLayerCard item={selectedSliceLayer} compact />
-            </Box>
-          ) : (
-            <Box
-              component="pre"
-              style={{
-                margin: 0,
-                maxWidth: 420,
-                maxHeight: 280,
-                overflow: 'auto',
-                whiteSpace: 'pre',
-              }}
-            >
-              <Text c="white" size="xs" style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace' }}>
-                {selectedItemJson}
-              </Text>
             </Box>
           )}
         </Paper>
@@ -117,4 +114,13 @@ export function WorkspacePerfHud({ fps, itemsCount, selectedCount, zoom, pan, se
       )}
     </Box>
   );
+}
+
+function safeParse(input?: string | null) {
+  if (!input) return {} as Record<string, unknown>;
+  try {
+    return JSON.parse(input) as unknown;
+  } catch (err) {
+    return { raw: input } as Record<string, unknown>;
+  }
 }
